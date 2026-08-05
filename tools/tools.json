@@ -1,0 +1,85 @@
+{
+  "_comment": [
+    "External tools, described by a command template and an output parser.",
+    "Each entry is disabled until you set \"enabled\": true and provide the paths it needs.",
+    "The command lines below are transcribed from each tool's published documentation and",
+    "have NOT been executed against the real software in this repository -- that is what",
+    "\"verified\": false means, and `python tools/run_tools.py check` prints it. Run once with",
+    "--dry-run to see the exact command that will be executed, and fix it here if the",
+    "installed version disagrees. Placeholders: {workdir} {outdir} {counts} {regions}",
+    "{binary_dir} {n_states} {seed} {bin_size} {sample} {env:VAR}."
+  ],
+  "tools": [
+    {
+      "key": "epicseg",
+      "display_name": "EpiCSeg (negative multinomial hidden Markov model)",
+      "stands_for": "published count-based segmentation; the closest prior art to ChromState's emission model",
+      "enabled": false,
+      "requires_env": ["EPICSEG_R"],
+      "requires_binary": "Rscript",
+      "input_format": "count_matrix",
+      "command": [
+        "Rscript", "{env:EPICSEG_R}", "segment",
+        "--counts", "{counts}",
+        "--regions", "{regions}",
+        "--nstates", "{n_states}",
+        "--outdir", "{outdir}"
+      ],
+      "output": {
+        "format": "segmentation_bed",
+        "path": "{outdir}/segmentation.bed",
+        "per_sample": false
+      },
+      "version_command": ["Rscript", "-e", "cat(as.character(packageVersion('epicseg')))"],
+      "verified": false,
+      "how_to_enable": "install EpiCSeg (Bioconductor/GitHub), then: export EPICSEG_R=/path/to/epicseg.R and set enabled=true",
+      "notes": "EpiCSeg's own counting step is bypassed so it sees ChromState's bins; check that its --counts reader accepts this matrix layout"
+    },
+    {
+      "key": "segway",
+      "display_name": "Segway (dynamic Bayesian network)",
+      "stands_for": "the other widely used segmenter; continuous signal, no binarisation",
+      "enabled": false,
+      "requires_env": ["SEGWAY_GENOMEDATA"],
+      "requires_binary": "segway",
+      "input_format": "count_matrix",
+      "command": [
+        "segway", "train",
+        "--num-labels", "{n_states}",
+        "--seed", "{seed}",
+        "{env:SEGWAY_GENOMEDATA}", "{outdir}/traindir"
+      ],
+      "output": {
+        "format": "segmentation_bed",
+        "path": "{outdir}/identifydir/segway.bed",
+        "per_sample": false
+      },
+      "version_command": ["segway", "--version"],
+      "verified": false,
+      "how_to_enable": "install Segway + GMTK, build a genomedata archive from the exported counts, then: export SEGWAY_GENOMEDATA=/path/to/archive",
+      "notes": "two-step tool: `segway train` then `segway identify` writes the BED. Extend this entry or run identify yourself before parsing"
+    },
+    {
+      "key": "epigenome_ssm",
+      "display_name": "epigenome-ssm (continuous state-space model)",
+      "stands_for": "continuous chromatin state features; direct prior art for quantitative state scores",
+      "enabled": false,
+      "requires_env": ["EPIGENOME_SSM_CMD"],
+      "input_format": "count_matrix",
+      "command": [
+        "{env:EPIGENOME_SSM_CMD}",
+        "--input", "{counts}",
+        "--num-features", "{n_states}",
+        "--output", "{outdir}"
+      ],
+      "output": {
+        "format": "labels",
+        "path": "{outdir}/labels.txt",
+        "per_sample": false
+      },
+      "verified": false,
+      "how_to_enable": "install epigenome-ssm, then: export EPIGENOME_SSM_CMD='python -m epigenome_ssm' (or the installed entry point)",
+      "notes": "emits continuous features, not labels; you need an argmax/threshold step to produce labels.txt, or compare its features directly"
+    }
+  ]
+}
