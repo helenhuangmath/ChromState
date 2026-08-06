@@ -217,7 +217,7 @@ def simulate(
     truth_scale: Dict[Tuple[str, str], float] = {}
     spikein: Dict[Tuple[str, str], float] = {}
 
-    for si, sample in enumerate(samples):
+    for sample in samples:
         path = base_path.copy()
         is_treated = sample in treated_set
         if is_treated and to_idx is not None:

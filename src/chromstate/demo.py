@@ -85,7 +85,6 @@ def run_demo(outdir: str, n_bins: int = 3000, seed: int = 1, n_states: int = 7) 
     a, b = ds.samples[0], ds.samples[1]
     flow = cs.state_flow(seg, a, b)
     occ = cs.occupancy_change(seg)
-    prop = cs.transition_propensity(seg, a, b)
     diff = cs.differential_state(seg, [a], [b])
     say(f"differential testing: {diff.note}")
     plan, ot_cost = cs.transport_flux(seg, a, b)

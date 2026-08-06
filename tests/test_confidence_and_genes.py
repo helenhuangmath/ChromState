@@ -25,7 +25,6 @@ from chromstate.calibrate import (
 from chromstate.features import FeatureSet, gene_state_matrix, map_bins_to_regions
 from chromstate.simulate import simulate
 
-
 # ---------------------------------------------------------------------------
 # Fixtures: a replicated two-condition experiment, plus synthetic genes
 # ---------------------------------------------------------------------------

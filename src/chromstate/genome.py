@@ -129,12 +129,12 @@ class BinSet:
         mask = np.ones(len(self), dtype=bool)
         offsets = self.chrom_offsets()
         for row in regions.itertuples(index=False):
-            chrom = getattr(row, "chrom")
+            chrom = row.chrom
             if chrom not in offsets:
                 continue
             start_row, n_rows = offsets[chrom]
-            lo = max(0, int(getattr(row, "start")) // self.bin_size)
-            hi = min(n_rows, int(getattr(row, "end")) // self.bin_size + 1)
+            lo = max(0, int(row.start) // self.bin_size)
+            hi = min(n_rows, int(row.end) // self.bin_size + 1)
             if hi > lo:
                 mask[start_row + lo : start_row + hi] = False
         return mask

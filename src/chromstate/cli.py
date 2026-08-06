@@ -14,7 +14,6 @@ import os
 import sys
 from typing import List, Optional
 
-import numpy as np
 import pandas as pd
 
 

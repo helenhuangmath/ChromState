@@ -20,7 +20,6 @@ from chromstate.model.emissions import (
 from chromstate.model.hmm import HMM, forward_backward, viterbi
 from chromstate.simulate import simulate
 
-
 # -- forward-backward --------------------------------------------------------
 
 

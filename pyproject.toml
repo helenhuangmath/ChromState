@@ -50,4 +50,9 @@ target-version = "py39"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
-ignore = ["E501"]
+ignore = [
+  "E501",
+  # The project supports Python 3.9, so keep legacy typing imports/annotations
+  # instead of requiring pyupgrade's Python 3.10+ spelling everywhere.
+  "UP",
+]

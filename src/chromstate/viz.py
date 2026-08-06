@@ -1007,7 +1007,6 @@ def plot_gene_trace(trace: Dict[str, object], palette: str = "roadmap", figsize=
     attr = trace["attribution"]
     comp = trace["composition"]
     marks = [c[len("signal_"):] for c in bins.columns if c.startswith("signal_")]
-    states = [c[len("post_"):] for c in bins.columns if c.startswith("post_")]
     samples = list(comp["sample"])
 
     fig, axes = plt.subplots(3, 1, figsize=figsize, facecolor=SURFACE,
@@ -1038,7 +1037,7 @@ def plot_gene_trace(trace: Dict[str, object], palette: str = "roadmap", figsize=
     _style_axes(ax, grid_axis="x")
     left = np.zeros(len(samples))
     order = list(comp.columns[2:])
-    for k, lbl in enumerate(order):
+    for lbl in order:
         vals = comp[lbl].to_numpy(dtype=float)
         ax.barh(np.arange(len(samples)), vals, left=left, height=0.62,
                 color=STATE_COLORS.get(str(lbl).split("_")[0], "#DDDDDD"),
