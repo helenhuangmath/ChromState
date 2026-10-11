@@ -10,3 +10,6 @@ demo_out/
 benchmark_out/
 chromstate_out/
 .DS_Store
+
+# real-data analysis outputs (large, regenerable)
+analysis/*/out/

@@ -19,6 +19,14 @@ upstream pipeline produced:
     a peak score rather than a count, so the model must use ``gaussian`` or
     ``bernoulli`` emissions. Using ``nb`` emissions on peak input is refused rather than
     silently producing a meaningless dispersion estimate.
+
+``bigwig``
+    A coverage track (bamCoverage, bedGraphToBigWig). The per-bin value is the
+    base-weighted mean coverage over the bin. A coverage track is scaled and smoothed by
+    whatever produced it, so it is not count data either, even when its values look like
+    integers. When it is the only input available, rounding a depth-scaled track gives a
+    usable count-like approximation for the negative binomial model, but that is a
+    choice the caller makes and records -- :func:`bin_bigwig` never makes it silently.
 """
 
 from __future__ import annotations
@@ -34,6 +42,7 @@ from ..genome import BinSet
 
 READ_FORMATS = ("bam", "bed")
 PEAK_FORMATS = ("peak", "narrowpeak", "broadpeak")
+COVERAGE_FORMATS = ("bigwig", "bw")
 
 
 def _open_text(path: str):
@@ -190,6 +199,76 @@ def score_peaks(
     return values
 
 
+def _bin_means_from_intervals(
+    starts: np.ndarray,
+    ends: np.ndarray,
+    values: np.ndarray,
+    n_bins: int,
+    bin_size: int,
+    chrom_size: int,
+) -> np.ndarray:
+    """Base-weighted mean of piecewise-constant coverage over consecutive bins.
+
+    Uses the running integral of coverage, evaluated at every bin edge, so each bin's
+    mean is exact however the track's intervals straddle the bin boundaries -- and no
+    per-base array the size of the chromosome is ever allocated. Uncovered bases count
+    as zero, which is what an absent interval in a coverage track means.
+    """
+    edges = np.minimum(np.arange(n_bins + 1, dtype=np.int64) * bin_size, chrom_size)
+    if len(starts) == 0:
+        return np.zeros(n_bins)
+    # integral up to the end of interval i
+    cum = np.concatenate([[0.0], np.cumsum(values * (ends - starts))])
+    # for each edge x: completed intervals are those with end <= x; add the partial one
+    i = np.searchsorted(ends, edges, side="right")
+    integral = cum[i]
+    partial = i < len(starts)
+    j = i[partial]
+    overlap = np.clip(edges[partial] - starts[j], 0, None)
+    integral[partial] += values[j] * overlap
+    widths = np.maximum(np.diff(edges), 1)
+    return np.diff(integral) / widths
+
+
+def bin_bigwig(path: str, binset: BinSet) -> np.ndarray:
+    """Mean coverage of a bigWig track in every bin of ``binset``.
+
+    Chromosomes in the bin set that the track does not cover are left at zero and
+    recorded nowhere else, so check the track's chromosome names against the bin set
+    (``chr1`` versus ``1``) when a whole chromosome comes back empty.
+    """
+    try:
+        import pyBigWig
+    except ImportError as exc:  # pragma: no cover - exercised only without pyBigWig
+        raise ImportError(
+            "Reading bigWig requires pyBigWig. Install with: pip install 'chromstate[bigwig]'"
+        ) from exc
+
+    out = np.zeros(len(binset), dtype=np.float64)
+    offsets = binset.chrom_offsets()
+    bw = pyBigWig.open(path)
+    try:
+        sizes = bw.chroms()
+        for chrom, (start_row, n_rows) in offsets.items():
+            if chrom not in sizes:
+                continue
+            ivs = bw.intervals(chrom) or ()
+            arr = np.asarray(ivs, dtype=np.float64).reshape(-1, 3)
+            order = np.argsort(arr[:, 0], kind="stable")
+            arr = arr[order]
+            out[start_row:start_row + n_rows] = _bin_means_from_intervals(
+                arr[:, 0].astype(np.int64),
+                arr[:, 1].astype(np.int64),
+                arr[:, 2],
+                n_rows,
+                binset.bin_size,
+                int(sizes[chrom]),
+            )
+    finally:
+        bw.close()
+    return out
+
+
 def load_signal(
     path: str,
     binset: BinSet,
@@ -207,7 +286,9 @@ def load_signal(
         return count_bed_reads(path, binset, **kwargs).astype(np.float64)
     if fmt in PEAK_FORMATS:
         return score_peaks(path, binset, **kwargs).astype(np.float64)
-    raise ValueError(f"Unknown input format {fmt!r}; expected one of bam, bed, peak")
+    if fmt in COVERAGE_FORMATS:
+        return bin_bigwig(path, binset)
+    raise ValueError(f"Unknown input format {fmt!r}; expected one of bam, bed, peak, bigwig")
 
 
 def infer_format(path: str) -> str:
@@ -217,6 +298,8 @@ def infer_format(path: str) -> str:
         base = base[:-3]
     if base.endswith(".bam"):
         return "bam"
+    if base.endswith((".bw", ".bigwig")):
+        return "bigwig"
     if base.endswith((".narrowpeak", ".broadpeak", ".gappedpeak")):
         return "peak"
     if "peak" in base:

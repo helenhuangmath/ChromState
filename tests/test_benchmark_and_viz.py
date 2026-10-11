@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 
@@ -186,8 +187,29 @@ def test_all_figures_render(demo_seg, tmp_path):
     paths = viz.save_all(figs, str(tmp_path))
     assert len(paths) == len(figs)
     for p in paths:
-        assert p.endswith(".png")
+        assert p.endswith(".pdf")
         assert (tmp_path / p.rsplit("/", 1)[-1]).stat().st_size > 3000
+
+
+def test_figures_follow_nature_style(demo_seg):
+    """All text black and 5-8 pt, and no figure wider than a double journal column."""
+    from matplotlib.colors import to_hex
+    from matplotlib.text import Text
+
+    from chromstate import viz
+
+    ds, _, seg = demo_seg
+    table = cs.quantify(seg)
+    figs = [viz.plot_emission_heatmap(seg), viz.plot_state_coverage(seg),
+            viz.plot_confidence(table), viz.plot_bivalency(table, sample=ds.samples[0])]
+    for fig in figs:
+        viz.enforce_text_style(fig)
+        assert fig.get_figwidth() <= viz.WIDTH_DOUBLE + 1e-9
+        for t in fig.findobj(Text):
+            if t.get_visible() and t.get_text().strip():
+                assert to_hex(t.get_color()) == "#000000", t.get_text()
+                assert 5.0 <= t.get_fontsize() <= 8.0, (t.get_text(), t.get_fontsize())
+        plt.close(fig)
 
 
 def test_cvd_palette_never_cycles_hues(demo_seg):
@@ -245,5 +267,5 @@ def test_cli_fit_end_to_end(tmp_path):
     assert code == 0
     for name in ("emissions.tsv", "transitions.tsv", "states.tsv", "quantification.tsv.gz"):
         assert (out / name).exists(), name
-    assert (out / "figures" / "emissions.png").exists()
+    assert (out / "figures" / "emissions.pdf").exists()
     assert (out / "control_segments.bed").exists()

@@ -33,6 +33,42 @@ EPS = 1e-300
 MIN_MEAN = 1e-6
 
 
+def _pair_index(X: np.ndarray, offsets: np.ndarray, m: int):
+    """Distinct (count, offset) pairs in column ``m`` and each row's index into them.
+
+    Count data has a few thousand distinct values per mark however many bins there are,
+    so likelihood terms are computed once per pair and gathered back to rows.
+    """
+    x_vals, x_inv = np.unique(X[:, m], return_inverse=True)
+    o_vals, o_inv = np.unique(offsets[:, m], return_inverse=True)
+    key = x_inv.ravel().astype(np.int64) * len(o_vals) + o_inv.ravel()
+    ukey, inv = np.unique(key, return_inverse=True)
+    return x_vals[ukey // len(o_vals)], o_vals[ukey % len(o_vals)], inv.ravel()
+
+
+class _PairCache:
+    """Per-mark pair indices, reused while the same arrays are passed back in.
+
+    EM calls the E- and M-steps with the identical ``X``/``offsets`` objects every
+    iteration; recomputing the sort each time dominated the runtime on genome-scale data.
+    The key includes a content fingerprint so a different array that happens to reuse a
+    freed object's id is never served a stale index.
+    """
+
+    def __init__(self) -> None:
+        self.key = None
+        self.pairs = None
+
+    def get(self, X: np.ndarray, offsets: np.ndarray):
+        key = (id(X), id(offsets), X.shape,
+               float(X[:: max(1, len(X) // 997)].sum()),
+               float(offsets[:: max(1, len(offsets) // 997)].sum()))
+        if key != self.key:
+            self.pairs = [_pair_index(X, offsets, m) for m in range(X.shape[1])]
+            self.key = key
+        return self.pairs
+
+
 class Emissions:
     """Interface every emission model implements."""
 
@@ -177,22 +213,29 @@ class NegativeBinomialEmissions(Emissions):
 
     def log_prob(self, X: np.ndarray, offsets: np.ndarray) -> np.ndarray:
         T, M = X.shape
-        K = self.n_states
-        out = np.zeros((T, K))
-        r = self.dispersion
-        gl_r = gammaln(r)
-        r_log_r = r * np.log(r)
-        # Terms independent of the state are dropped from the loop for speed but kept
-        # in the total, so the returned value is a true log-likelihood (comparable
-        # across models, which the benchmark relies on).
-        const = (gammaln(X + r) - gl_r - gammaln(X + 1.0)).sum(axis=1)
-        for k in range(K):
-            mean = np.maximum(offsets * self.mu[k], MIN_MEAN)
+        out = np.zeros((T, self.n_states))
+        # The full NB log-likelihood (state-independent terms included, so the value is
+        # a true log-likelihood comparable across models), evaluated once per distinct
+        # (count, offset) pair and gathered back to rows.
+        for m, (x, off, inv) in enumerate(self._cache().get(X, offsets)):
+            r = self.dispersion[m]
+            mean = np.maximum(off[:, None] * self.mu[None, :, m], MIN_MEAN)
             rp = r + mean
-            out[:, k] = const + (r_log_r - r * np.log(rp) + X * (np.log(mean) - np.log(rp))).sum(
-                axis=1
+            table = (gammaln(x + r) - gammaln(r) - gammaln(x + 1.0))[:, None] + (
+                r * np.log(r) - r * np.log(rp) + x[:, None] * (np.log(mean) - np.log(rp))
             )
+            out += table[inv]
         return out
+
+    def __getstate__(self):
+        state = dict(self.__dict__)
+        state.pop("_pairs", None)  # row indices for one dataset; never worth persisting
+        return state
+
+    def _cache(self) -> "_PairCache":
+        if getattr(self, "_pairs", None) is None:
+            self._pairs = _PairCache()
+        return self._pairs
 
     def log_prob_by_mark(self, X: np.ndarray, offsets: np.ndarray, state: int) -> np.ndarray:
         r = self.dispersion
@@ -219,17 +262,27 @@ class NegativeBinomialEmissions(Emissions):
         self._update_dispersion(X, offsets, gamma)
 
     def _update_dispersion(self, X: np.ndarray, offsets: np.ndarray, gamma: np.ndarray) -> None:
-        """One-dimensional weighted MLE for ``r``, per mark."""
-        for m in range(self.n_marks):
-            x = X[:, m]
-            means = np.maximum(offsets[:, m][:, None] * self.mu[:, m][None, :], MIN_MEAN)
+        """One-dimensional weighted MLE for ``r``, per mark.
 
-            def neg_ll(log_r: float, x=x, means=means) -> float:
+        The likelihood depends on a row only through its (count, offset) pair, and real
+        count data has a few thousand distinct pairs across millions of bins. Rows are
+        collapsed onto those pairs with their responsibilities summed, which gives the
+        same objective while making each optimiser step independent of genome size.
+        """
+        for m, (x, off, inv) in enumerate(self._cache().get(X, offsets)):
+            weights = np.stack(
+                [np.bincount(inv, weights=gamma[:, k], minlength=len(x))
+                 for k in range(gamma.shape[1])],
+                axis=1,
+            )
+            means = np.maximum(off[:, None] * self.mu[:, m][None, :], MIN_MEAN)
+
+            def neg_ll(log_r: float, x=x, means=means, weights=weights) -> float:
                 r = np.exp(log_r)
                 rp = r + means
                 ll = gammaln(x[:, None] + r) - gammaln(r) - gammaln(x[:, None] + 1.0)
                 ll = ll + r * np.log(r) - r * np.log(rp) + x[:, None] * (np.log(means) - np.log(rp))
-                return -float((gamma * ll).sum())
+                return -float((weights * ll).sum())
 
             res = minimize_scalar(
                 neg_ll, bounds=(np.log(1e-3), np.log(1e5)), method="bounded",

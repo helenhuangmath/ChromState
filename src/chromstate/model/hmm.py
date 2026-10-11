@@ -142,13 +142,42 @@ def forward_backward(
     return gamma, xi, loglik
 
 
-def viterbi(log_B: np.ndarray, A: np.ndarray, pi: np.ndarray) -> np.ndarray:
-    """Most likely state path for one chain."""
+@njit(cache=True)
+def _viterbi_numba(log_B, log_A, log_pi):  # pragma: no cover - compiled
     T, K = log_B.shape
-    log_A = np.log(np.maximum(A, EPS))
     delta = np.empty((T, K))
     psi = np.zeros((T, K), dtype=np.int32)
-    delta[0] = np.log(np.maximum(pi, EPS)) + log_B[0]
+    for k in range(K):
+        delta[0, k] = log_pi[k] + log_B[0, k]
+    for t in range(1, T):
+        for j in range(K):
+            best = -np.inf
+            arg = 0
+            for i in range(K):
+                v = delta[t - 1, i] + log_A[i, j]
+                if v > best:
+                    best = v
+                    arg = i
+            psi[t, j] = arg
+            delta[t, j] = best + log_B[t, j]
+    path = np.empty(T, dtype=np.int32)
+    best = -np.inf
+    arg = 0
+    for k in range(K):
+        if delta[T - 1, k] > best:
+            best = delta[T - 1, k]
+            arg = k
+    path[T - 1] = arg
+    for t in range(T - 2, -1, -1):
+        path[t] = psi[t + 1, path[t + 1]]
+    return path
+
+
+def _viterbi_numpy(log_B, log_A, log_pi):
+    T, K = log_B.shape
+    delta = np.empty((T, K))
+    psi = np.zeros((T, K), dtype=np.int32)
+    delta[0] = log_pi + log_B[0]
     for t in range(1, T):
         scores = delta[t - 1][:, None] + log_A
         psi[t] = np.argmax(scores, axis=0)
@@ -158,6 +187,14 @@ def viterbi(log_B: np.ndarray, A: np.ndarray, pi: np.ndarray) -> np.ndarray:
     for t in range(T - 2, -1, -1):
         path[t] = psi[t + 1, path[t + 1]]
     return path
+
+
+def viterbi(log_B: np.ndarray, A: np.ndarray, pi: np.ndarray) -> np.ndarray:
+    """Most likely state path for one chain."""
+    log_A = np.log(np.maximum(A, EPS))
+    log_pi = np.log(np.maximum(pi, EPS))
+    impl = _viterbi_numba if _HAS_NUMBA else _viterbi_numpy
+    return impl(np.ascontiguousarray(log_B, dtype=np.float64), log_A, log_pi)
 
 
 @dataclass

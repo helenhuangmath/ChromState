@@ -298,9 +298,9 @@ def _write_report(outdir, seg, scores, comparison, binar, normex, perturb,
         "",
         "## Figures",
         "",
-        *[f"- `figures/{n}.png`" for n in sorted(
+        *[f"- `figures/{n}.pdf`" for n in sorted(
             os.path.splitext(f)[0] for f in os.listdir(os.path.join(outdir, "figures"))
-            if f.endswith(".png")
+            if f.endswith(".pdf")
         )],
     ]
     with open(path, "w") as fh:

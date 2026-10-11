@@ -9,7 +9,7 @@ description = "Quantitative chromatin state analysis: soft state composition, bi
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
-authors = [{ name = "Helen Huang" }]
+authors = [{ name = "Hua Huang" }]
 keywords = ["epigenomics", "chromatin", "ChIP-seq", "CUT&RUN", "ATAC-seq", "HMM"]
 classifiers = [
   "Intended Audience :: Science/Research",

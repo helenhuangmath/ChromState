@@ -84,6 +84,8 @@ STATE_RULES: List[Tuple[str, Sequence[str], Sequence[str]]] = [
     ("TssFlnk", ("K4me3", "K4me1"), ("K27me3",)),
     ("EnhA", ("K4me1", "K27ac"), ("K4me3",)),
     ("EnhWk", ("K4me1",), ("K27ac", "K4me3")),
+    # Panels without H3K4me1: acetylation away from H3K4me3 is the enhancer signature.
+    ("EnhA", ("K27ac",), ("K4me3",)),
     ("Tx", ("K36me3",), ()),
     ("ReprPC", ("K27me3",), ("K4me3", "K4me1")),
     ("Het", ("K9me3",), ()),
@@ -135,8 +137,11 @@ def annotate_states(
         percentile", so quantile rules mislabel exactly the sparse, informative marks
         (H3K9me3, H3K36me3) that identify a state most cleanly.
     quiet_frac
-        A state whose total emission is below this fraction of the strongest state's is
-        called Quiescent before any other rule is tried.
+        A state in which *every* mark is below this fraction of that mark's maximum is
+        called Quiescent before any other rule is tried. The test is per mark, not on the
+        summed emission: on real data one mark (H3K4me3 at active promoters) can dwarf
+        the rest, and a summed threshold then calls a clear Polycomb or heterochromatin
+        state quiescent.
 
     Returns
     -------
@@ -152,15 +157,13 @@ def annotate_states(
     Z = M / denom
 
     idx = {c: j for j, c in enumerate(canon)}
-    total = M.sum(axis=1)
-    quiet_cut = quiet_frac * total.max()
 
     raw_labels: List[str] = []
     rules: List[str] = []
     for k in range(K):
-        if total[k] <= quiet_cut:
+        if Z[k].max() < quiet_frac:
             raw_labels.append("Quies")
-            rules.append(f"total emission below {quiet_frac:.0%} of the strongest state")
+            rules.append(f"every mark below {quiet_frac:.0%} of its maximum across states")
             continue
         matched = None
         for label, highs, lows in STATE_RULES:
