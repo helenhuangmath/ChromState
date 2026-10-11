@@ -296,3 +296,26 @@ def test_auto_emission_follows_input_type():
     assert fit(ds, n_states=3, n_restarts=1, n_iter=10).meta["emission"] == "nb"
     ds.is_count = False
     assert fit(ds, n_states=3, n_restarts=1, n_iter=10).meta["emission"] == "gaussian"
+
+
+def test_one_dominant_mark_does_not_make_repressive_states_quiescent():
+    """Real-data emission scale: an active-TSS H3K4me3 mean ~120 dwarfs everything else.
+
+    A summed-emission quiescence threshold called the H3K27me3 and H3K9me3 states below
+    quiescent here; the per-mark rule must name them Polycomb and heterochromatin.
+    """
+    from chromstate.model.annotate import annotate_states
+
+    marks = ["H3K4me3", "H3K27ac", "H3K27me3", "H3K9me3"]
+    M = np.array([
+        [0.0, 0.0, 0.0, 0.0],
+        [0.6, 0.2, 0.3, 5.8],      # heterochromatin
+        [4.3, 0.7, 17.3, 0.5],     # Polycomb
+        [11.6, 1.0, 45.9, 0.5],    # strong Polycomb
+        [117.8, 34.7, 4.5, 0.8],   # active TSS
+    ])
+    labels, _, _ = annotate_states(M, marks)
+    assert labels[0].startswith("Quies")
+    assert labels[1] == "Het"
+    assert labels[2].startswith("ReprPC") and labels[3].startswith("ReprPC")
+    assert labels[4] == "TssA"

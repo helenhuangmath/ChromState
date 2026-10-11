@@ -238,3 +238,36 @@ def test_spikein_requires_counts():
     ds, _ = simulate(n_bins=200, n_chroms=1, seed=9)
     with pytest.raises(ValueError, match="requires the spikein"):
         compute_size_factors(ds, method="spikein")
+
+
+# -- bigWig coverage ---------------------------------------------------------
+
+
+def test_bigwig_bin_means_match_per_base_average(tmp_path, small_binset):
+    """Intervals that straddle bin edges, gaps, and a truncated final bin all average exactly."""
+    pyBigWig = pytest.importorskip("pyBigWig")
+    from chromstate.io.counts import bin_bigwig
+
+    path = str(tmp_path / "cov.bw")
+    bw = pyBigWig.open(path, "w")
+    bw.addHeader([("chr1", 2000), ("chr2", 1000)])
+    # chr1: gaps (zero coverage), intervals crossing the 200 bp edges
+    bw.addEntries(["chr1"] * 4, [50, 150, 420, 1900], ends=[150, 330, 600, 2000],
+                  values=[2.0, 5.0, 1.5, 4.0])
+    bw.addEntries(["chr2"], [950], ends=[1000], values=[10.0])
+    bw.close()
+
+    per_base = {"chr1": np.zeros(2000), "chr2": np.zeros(1000)}
+    per_base["chr1"][50:150] = 2.0
+    per_base["chr1"][150:330] = 5.0
+    per_base["chr1"][420:600] = 1.5
+    per_base["chr1"][1900:2000] = 4.0
+    per_base["chr2"][950:1000] = 10.0
+    expected = np.array([
+        per_base[r.chrom][r.start:r.end].mean() for r in small_binset.table.itertuples()
+    ])
+
+    got = bin_bigwig(path, small_binset)
+    np.testing.assert_allclose(got, expected)
+    assert infer_format(path) == "bigwig"
+    np.testing.assert_allclose(cs.load_signal(path, small_binset), expected)

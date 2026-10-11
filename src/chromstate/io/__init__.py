@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from .counts import (
+    bin_bigwig,
     count_bam,
     count_bed_reads,
     infer_format,
@@ -15,6 +16,7 @@ from .manifest import MarkFile, manifest_to_frame, read_manifest, validate_manif
 
 __all__ = [
     "MarkFile",
+    "bin_bigwig",
     "count_bam",
     "count_bed_reads",
     "infer_format",
