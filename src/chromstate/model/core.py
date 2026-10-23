@@ -217,7 +217,8 @@ def fit(
 
     posterior = hmm.posterior(X, offsets, chains)
     states = hmm.decode(X, offsets, chains)
-    labels, colors, rules = annotate_states(hmm.emissions.mean_matrix(), ds.marks)
+    labels, colors, rules = annotate_states(hmm.emissions.mean_matrix(), ds.marks,
+                                            occupancy=posterior.mean(axis=0))
     collapse = _collapse_diagnostic(hmm, states, n_states)
 
     return Segmentation(

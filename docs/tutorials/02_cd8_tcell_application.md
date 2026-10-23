@@ -1,5 +1,8 @@
 # Tutorial 2 — Application: chromatin states and gene expression in CD8 T-cell differentiation
 
+
+Pre-generated [CD8 T-cell example figures](../figures/README.md#cd8-t-cell-application) are included for browsing.
+
 This tutorial applies ChromState to primary mouse CD8 T cells in three differentiation
 states. It works through each analysis step: building the chromatin state model, linking
 it to RNA-seq, and asking four biological questions.
@@ -55,8 +58,14 @@ python s06_bivalency.py       # bivalency vs published poised promoters       ~1
 python s07_figures.py         # Figs 1-3
 python s08_importance.py      # state importance; additive vs combinatorial   ~25 min
 python s09_cross_lag.py       # chromatin-first vs RNA-first test             ~2 min
+python s11_reliability.py     # chromatin/RNA reliability from replicate tracks ~1 min
+python s09_cross_lag.py       # rerun: ordering corrected for measurement error
 python s10_figures_order.py   # Figs 4-5
+python s12_marker_genes.py    # Fig 6
 ```
+
+Results with interpretation and Nature-style figure legends are collected in
+[`analysis/scireports2025/RESULTS.md`](../../analysis/scireports2025/RESULTS.md).
 
 Shared paths and constants are in `common.py`, and the figure style in `nature_style.py`.
 
@@ -90,22 +99,23 @@ so a state means the same thing in every cell state.
 
 ### 3.3 Decoding and naming states
 
-`s04_gene_features.py` applies the fitted model to every chromosome. States are named
-automatically, but with four marks several weak states receive the generic name
-"Quiescent". Figures therefore label each state with the marks it is actually enriched
-for, as fold over the genome-wide average (shown if ≥ 1.5×):
+`s04_gene_features.py` applies the fitted model to every chromosome and names each
+state from its **fold enrichment**: the state's mean read count for a mark divided by the
+genome-wide average for that mark (occupancy-weighted, TN). "H3K4me3 26×" means the
+state's bins carry 26 times the genome-average H3K4me3. A mark counts as present at
+≥ 1.5× and as strong at ≥ 4×. The figure labels list every mark at ≥ 1.5×.
 
 | State | Enriched marks | Share of genome in TN |
 |---|---|---|
 | Active TSS | H3K4me3 26×, H3K27ac 29× | 1.3% |
 | Bivalent TSS | H3K4me3 14×, H3K27me3 8×, H3K27ac 4× | 0.5% |
-| H3K4me3 + H3K27ac (enhancer-like) | H3K4me3 3.8×, H3K27ac 6.0× | 2.4% |
+| Flanking TSS | H3K27ac 6.0×, H3K4me3 3.8× | 2.4% |
 | Polycomb repressed (2) | H3K27me3 10×, H3K4me3 2× | 2.8% |
 | Polycomb repressed (1) | H3K27me3 4.2× | 6.6% |
-| H3K9me3 | H3K9me3 3.2× | 16.5% |
+| Weak heterochromatin (3) | H3K9me3 3.2× | 16.5% |
 | Heterochromatin (high signal) | H3K9me3 19×, H3K27ac 7.8×, H3K4me3 4.9× | 0.1% |
-| Weak H3K27me3 (Unclassified 1) | H3K27me3 1.8× | 9.7% |
-| Weak H3K9me3 (Quiescent 4 and 7) | H3K9me3 1.5–1.9× | 21.2% |
+| Weakly Polycomb repressed | H3K27me3 1.8× | 9.7% |
+| Weak heterochromatin (1) and (2) | H3K9me3 1.5–1.9× | 21.2% |
 | Five background-level states | none ≥ 1.5× | 38.8% |
 
 **Fig. 1** shows the log-scaled emissions, genome occupancy in each cell state, the
@@ -249,10 +259,10 @@ no other state can substitute for.
 |---|---|---|---|
 | Active TSS | **0.347** | **0.416** | **0.415** |
 | Bivalent TSS | 0.022 | 0.077 | 0.091 |
-| H3K4me3 + H3K27ac (enhancer-like) | 0.083 | 0.056 | 0.077 |
+| Flanking TSS | 0.083 | 0.056 | 0.077 |
 | Polycomb repressed (2) | 0.005 | 0.041 | 0.077 |
-| Weak H3K27me3 (Unclassified 1) | 0.002 | 0.040 | 0.041 |
-| Background states 5 and 6 | 0.129, 0.084 | ≤ 0.005 | ≤ 0.004 |
+| Weakly Polycomb repressed | 0.002 | 0.040 | 0.041 |
+| Background states (4) and (5) | 0.129, 0.084 | ≤ 0.005 | ≤ 0.004 |
 | H3K9me3 and heterochromatin states | ≤ 0.002 | ≤ 0.005 | ≤ 0.004 |
 
 - **One dominant state.** The active-TSS state carries most of the information in
@@ -317,38 +327,99 @@ The asymmetry |β| − |γ| (x-axis of Fig. 4) indicates which way the relations
 For a ChromState state (Fig. 4b), *V* is the fraction of the promoter (TSS ± 1 kb)
 occupied by that state.
 
+**Correcting for measurement error.** A noisy predictor attenuates its own slope and
+leaves the other predictor to absorb what it failed to control for. With correlated
+predictors this bias can go either way. Step 11 therefore measures reliability from the
+per-replicate tracks available locally: the mean correlation between single replicates,
+converted to the reliability of the pooled track by the Spearman–Brown formula.
+
+| Signal | Single replicate r | Pooled-track reliability |
+|---|---|---|
+| RNA (TN, 8 replicates) | 0.995 | 0.999 |
+| H3K4me3 (TN) | 0.956 | 0.994 |
+| H3K27ac (TN) | 0.949 | 0.993 |
+| H3K27me3 (TEX; proxy) | 0.766 | 0.929 |
+| H3K9me3 (TMEM, 2 replicates; proxy) | 0.340 | 0.673 |
+
+The regressions are then refitted as errors-in-variables regressions: the error variance
+(1 − reliability) is removed from the predictor covariance before solving. States use
+the reliability of their least reliable enriched mark. In Fig. 4, filled symbols are
+corrected and open symbols (background states) are uncorrected.
+
+**Results after correction:**
+
 | Leans chromatin first | Leans RNA first | No clear order |
 |---|---|---|
-| H3K27me3 (promoter and body, TEX); Polycomb, bivalent TSS and H3K4me3+H3K27ac promoter states (TEX); bivalent TSS (TMEM) | H3K9me3 promoter (TMEM and TEX, largest effect); H3K4me3 promoter; H3K4me3 gene body (TMEM) | H3K27ac promoter; background states |
+| Active-TSS and flanking-TSS promoter states (TEX); H3K27ac in the gene body (TMEM, TEX) | H3K4me3 promoter and gene body (TMEM); H3K9me3 promoter (TMEM, TEX) and gene body (TEX); Polycomb promoter states (TMEM) | H3K27me3 promoter and body; bivalent TSS; H3K27ac promoter |
 
-- **Polycomb and bivalent chromatin lead.** Polycomb and bivalent marking in naive cells
-  anticipates later transcriptional change, consistent with poised promoters being
-  established before their genes are induced.
-- **H3K4me3 follows.** H3K4me3 behaves as a consequence of transcription, consistent
-  with its deposition by transcription-coupled machinery.
-- **H3K9me3 may follow transcription.** The H3K9me3 asymmetry suggests that H3K9me3
-  gain follows transcription. This offers a possible explanation for the study's
-  observation that narrow H3K9me3 peaks associate with *increased* expression in TEX.
+- **Active promoter chromatin primes exhaustion.** Active promoter configurations in TN
+  anticipate expression change towards exhaustion. In Fig. 6, *Pdcd1* and *Tigit* carry
+  weak active marking in TN that is amplified 4- to 9-fold as their expression rises.
+- **H3K4me3 follows transcription**, consistent with its transcription-coupled
+  deposition.
+- **H3K9me3 gain follows transcription.** This survives the correction despite its low
+  reliability, and offers a reading of the study's observation that narrow H3K9me3
+  peaks associate with *increased* expression in TEX.
+- **Polycomb in memory follows transcription.** Polycomb states in TMEM follow
+  transcription, as H3K27me3 is laid on genes such as *Sell* and *Ccr7* after they are
+  switched off.
+- **The correction changes the H3K27me3 result.** Before correction H3K27me3 appeared
+  to lead (+0.022 promoter, +0.051 body, TEX); after it, there is no clear order. The
+  bivalent anticipation of section 6 holds *within* bivalent promoters but does not make
+  H3K27me3 a genome-wide predictor.
 
-**Effect sizes are small** (|asymmetry| ≤ 0.09 standard deviations). Two further
-properties of this test shape interpretation (section 9).
+**Effect sizes are small** (|asymmetry| ≤ 0.10 SD).
+
+### 8.1 Marker genes (step 12; Fig. 6)
+
+For 25 canonical genes, Fig. 6 shows three panels in TN, TMEM and TEX:
+- **a**, promoter state composition;
+- **b**, each mark's promoter signal;
+- **c**, expression.
+
+**How a gene's state is measured.**
+- The promoter (TSS ± 1 kb) is ten 200 bp bins, and each bin has a probability for
+  every one of the 15 states.
+- The gene's composition is the mean over the ten bins, so a gene usually carries
+  several states. *Tox* in TN is 70% active TSS (central bins) and 30% flanking TSS
+  (downstream bins). Each individual bin here is called with probability ≈ 1.0, so the
+  mixtures arise mainly from different bins sitting in different states.
+- Panel a sums the 15 states into five classes for display. That hides magnitude, which
+  panel b restores.
+- These are descriptive per-gene readings, not per-gene statistical tests.
+
+- **Naive genes are silenced by Polycomb.** *Sell* and *Ccr7* go from fully active
+  promoters in TN to bivalent or Polycomb-repressed promoters, with 20- to 60-fold lower
+  expression.
+- **Memory keeps, exhaustion poises.** *Tcf7*, *Lef1* and *Il7r* stay active in TMEM;
+  *Tcf7* and *Lef1* become bivalent in TEX.
+- **Effector genes are activated from repressed promoters.** *Klrg1* goes from fully
+  Polycomb in TN to fully active in TMEM and TEX.
+- **Primed exhaustion genes.** *Pdcd1* and *Tigit* (log2 expression ≈ 5 in TN) carry a
+  focal, weak active configuration in TN (*Pdcd1* H3K4me3 48, H3K27ac 13 reads per bin).
+  It is amplified 4- to 9-fold in TEX (H3K4me3 215, H3K27ac 116) as expression rises
+  about 100-fold. *Havcr2* instead starts near background and is activated de novo.
+- ***Tox* is held bivalent in memory.** Its H3K4me3 stays constant (53–67 reads), while
+  H3K27me3 rises from 1 to 14 in TMEM and falls back in TEX, where *Tox* is most
+  expressed.
+- **Bivalent genes resolve.** *Eomes* resolves from bivalent in TN to active in TEX.
 
 ---
 
 ## 9. Scope and caveats
 
-- **Pooled chromatin.** Chromatin input has no replicates. Replicate noise floors and
+- **Pooled chromatin.** The analysis tracks are pooled. Replicate noise floors and
   region-level differential tests (`cs.differential_regions`) were therefore not run.
-  In the ordering test, noisier chromatin biases results towards "RNA leads", so the
-  chromatin-first findings are conservative while the RNA-first findings, especially
-  H3K9me3, require confirmation. TN RNA is highly reproducible (day 30 vs day 32
-  Spearman ρ = 0.994).
+  Measurement reliability was estimated from the per-replicate tracks available
+  locally. For H3K27me3 and H3K9me3 it comes from another cell state, and for states
+  from their least reliable mark (section 8).
 - **Endpoints, not a time course.** TMEM and TEX are sampled 30 days after TN. The
   ordering analysis describes which layer is predictive across that step; it does not
   measure timing or establish causality.
 - **No spike-in.** Global differences in a mark between cell states are normalised away.
-- **Model fit.** The best 15-state optimum was reached in one of eight restarts, and the
-  held-out likelihood was still rising at K = 15.
+- **Model fit.** The best 15-state optimum was reached by 1 of 16 restarts but is 47,600
+  log-likelihood units better than any other. The held-out likelihood was still rising
+  at K = 15.
 
 **Recommended next steps:**
 - count per-replicate reads from the BAM files, which enables noise floors,
@@ -366,6 +437,6 @@ properties of this test shape interpretation (section 9).
    table.
 2. **Marks and conditions.** Set `MARKS`, `CONDITIONS` and `TRAIN_CHROMS`. Bivalency
    needs H3K4me3 and H3K27me3.
-3. **Steps.** Run steps 1–10. Steps 5, 8 and 9 need only the per-gene feature table from
+3. **Steps.** Run steps 1–12. Steps 5, 8 and 9 need only the per-gene feature table from
    step 4 and the RNA tables from step 3, so they work for any panel of marks and any
    number of conditions with a common precursor.

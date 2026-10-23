@@ -47,32 +47,42 @@ TASK_TONES = {"Level (TN)": "#9cc0ec", "Change (TMEM vs TN)": ns.ACCENT,
 
 
 def asym_panel(ax, sub: pd.DataFrame, order, names, title):
+    """Measurement-corrected asymmetry (filled) where a reliability exists, else raw (open)."""
     y = np.arange(len(order))
     for later, dy in [("TMEM", -0.17), ("TEX", 0.17)]:
         d = sub.loc[sub["later"] == later].set_index("variable").loc[order]
         col = LATER_COLORS[later]
-        ax.hlines(y + dy, d["asym_lo"], d["asym_hi"], color=col, linewidth=0.7)
-        ax.plot(d["asymmetry"], y + dy, "o", color=col, markersize=3, label=later)
+        has = d["asymmetry_corrected"].notna() if "asymmetry_corrected" in d else pd.Series(False, d.index)
+        val = np.where(has, d.get("asymmetry_corrected"), d["asymmetry"])
+        lo = np.where(has, d.get("asym_lo_corrected"), d["asym_lo"])
+        hi = np.where(has, d.get("asym_hi_corrected"), d["asym_hi"])
+        ax.hlines(y + dy, lo, hi, color=col, linewidth=0.7)
+        ax.plot(val[has.to_numpy()], (y + dy)[has.to_numpy()], "o", color=col, markersize=3,
+                label=later)
+        ax.plot(val[~has.to_numpy()], (y + dy)[~has.to_numpy()], "o", color=col, markersize=3,
+                markerfacecolor="white", markeredgewidth=0.7)
     ax.axvline(0, color=ns.INK, linewidth=0.5)
     ax.set_yticks(y)
     ax.set_yticklabels(names)
     ax.invert_yaxis()
     ax.set_xlabel("|chromatin → RNA| − |RNA → chromatin|\n(standardised coefficients)")
     ax.set_title(title)
-    lo, hi = ax.get_xlim()
-    lim = max(abs(lo), abs(hi))
+    lo_, hi_ = ax.get_xlim()
+    lim = max(abs(lo_), abs(hi_))
     ax.set_xlim(-lim, lim)
-    ax.text(0.02, -0.16 - 0.04 * 0, "← RNA leads", transform=ax.transAxes, ha="left",
-            va="top", fontsize=5.5)
-    ax.text(0.98, -0.16, "chromatin leads →", transform=ax.transAxes, ha="right",
-            va="top", fontsize=5.5)
+    ax.text(0.02, -0.16, "← RNA leads", transform=ax.transAxes, ha="left", va="top",
+            fontsize=5.5)
+    ax.text(0.98, -0.16, "chromatin leads →", transform=ax.transAxes, ha="right", va="top",
+            fontsize=5.5)
     ax.grid(axis="x", linewidth=0.3, color="#e6e6e6")
     ax.set_axisbelow(True)
 
 
 def figure4():
     t = pd.read_csv(OUT / "cross_lag" / "cross_lag.tsv", sep="\t")
-    rel = pd.read_csv(OUT / "cross_lag" / "reliability.tsv", sep="\t").iloc[0, 0]
+    rel = pd.read_csv(OUT / "reliability" / "reliability.tsv", sep="\t").set_index("mark")
+    rel_txt = ", ".join(f"{m} {rel.loc[m, 'pooled_reliability'].min():.2f}"
+                        for m in ["H3K4me3", "H3K27ac", "H3K27me3", "H3K9me3", "RNA"])
     marks = t.loc[t["kind"] == "mark"]
     states = t.loc[t["kind"] == "state"]
 
@@ -93,8 +103,8 @@ def figure4():
     ns.panel_label(ax, "b", x=-0.75)
 
     fig.text(0.01, 0.015,
-             f"Bars: 95% bootstrap CI over genes. TN RNA reliability (day 30 vs 32) ρ = {rel:.3f}; "
-             "chromatin is pooled without replicates, which biases towards 'RNA leads'.",
+             "Filled: corrected for measurement error using replicate reliabilities "
+             f"({rel_txt}); open: uncorrected (background states). Bars: 95% bootstrap CI over genes.",
              fontsize=5.5, ha="left", va="bottom")
     ns.save(fig, FIG, "Fig4_cross_lag")
 

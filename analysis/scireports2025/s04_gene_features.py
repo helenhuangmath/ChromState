@@ -81,9 +81,13 @@ def main() -> None:
     with open(OUT / MODEL_DIR / "model.pkl", "rb") as fh:
         model = pickle.load(fh)
     hmm = model["hmm"]
-    # Re-derive names from the fitted emissions so a label-rule fix applies without refitting.
-    labels, colors, rules = annotate_states(hmm.emissions.mean_matrix(), MARKS)
-    K = len(labels)
+    # States are carried as S0..S{K-1} while decoding and named at the end, from their
+    # genome-wide occupancy -- the training chromosomes are gene-rich, so naming from
+    # them would inflate the background and under-call weak states.
+    K = hmm.n_states
+    labels = [f"S{k}" for k in range(K)]
+    colors = ["#DDDDDD"] * K
+    rules = [""] * K
     features = FeatureSet(pd.read_csv(OUT / "rna" / "genes.tsv", sep="\t"), source="featureCounts")
 
     frames, occupancy, beds = [], [], {c: [] for c in CONDITIONS}
@@ -141,14 +145,26 @@ def main() -> None:
             beds[cond].append(seg.to_bed(sample=cond))
         print(f"{chrom:6s} bins {n:,}  genes {len(fs):,}", flush=True)
 
+    # name from TN occupancy, the same reference the figure labels use
+    occ_all = pd.DataFrame([o for o in occupancy if o.name[0] == "Naive"]).sum(axis=0).to_numpy()
+    names, colors, rules = annotate_states(hmm.emissions.mean_matrix(), MARKS, occupancy=occ_all)
+    rename = dict(zip(labels, names))
     table = pd.concat(frames, ignore_index=True)
+    table = table.rename(columns=lambda c: next(
+        (c.replace(f"_cs_{k}", f"_cs_{v}") for k, v in rename.items() if c.endswith(f"_cs_{k}")), c))
+    labels = names
     table.to_csv(gdir / "gene_features.tsv.gz", sep="\t", index=False)
-    occ = pd.DataFrame(occupancy)
+    occ = pd.DataFrame(occupancy).rename(columns=rename)
     occ.index = pd.MultiIndex.from_tuples(occ.index, names=["condition", "chrom"])
     occ = occ.groupby("condition").sum()
     (occ.div(occ.sum(axis=1), axis=0)).to_csv(OUT / MODEL_DIR / "occupancy_genome.tsv", sep="\t")
     for cond, parts in beds.items():
-        pd.concat(parts).to_csv(sdir / f"{cond}_chromstate_K{K}_dense.bed", sep="\t",
+        bed = pd.concat(parts)
+        bed["name"] = bed["name"].map(rename)
+        rgb = {n: ",".join(str(int(c.lstrip("#")[i:i + 2], 16)) for i in (0, 2, 4))
+               for n, c in zip(names, colors)}
+        bed["itemRgb"] = bed["name"].map(rgb)
+        bed.to_csv(sdir / f"{cond}_chromstate_K{K}_dense.bed", sep="\t",
                                 header=False, index=False)
     pd.DataFrame({"label": labels, "color": colors, "rule": rules}).to_csv(
         OUT / MODEL_DIR / "state_labels.tsv", sep="\t", index=False)

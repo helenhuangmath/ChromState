@@ -92,8 +92,7 @@ def main() -> None:
                            "Naive bivalency balance": "P_cs_biv_balance",
                            "Naive active-state mass": None}.items():
             if col is None:
-                active_cols = [c for c in sub.columns if c.startswith("P_cs_Tss")
-                               or c.startswith("P_cs_Enh")]
+                active_cols = [c for c in sub.columns if c.startswith(("P_cs_TssA", "P_cs_TssFlnk"))]
                 x = sub[active_cols].sum(axis=1).to_numpy() if active_cols else np.zeros(len(sub))
             else:
                 x = sub[col].to_numpy()

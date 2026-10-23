@@ -1,5 +1,8 @@
 # Tutorial 1 — Simulation: checking ChromState against known ground truth
 
+
+Pre-generated [simulation figures](../figures/README.md#simulation) are included for browsing.
+
 This tutorial simulates a two-condition chromatin experiment in which every state, every
 bivalent region and every perturbed region is known in advance. It then runs the
 ChromState workflow on the simulated data and checks each result against that truth.
