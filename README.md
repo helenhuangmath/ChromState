@@ -1,5 +1,8 @@
 # ChromState: quantitative chromatin state analysis
 
+
+Browse the included [example figures](docs/figures/README.md) from the simulation and CD8 T-cell tutorials.
+
 **Hua Huang** · Version 0.1.0 (research release) 
 Python package `chromstate`, R interface `chromstatR` · MIT licence
 

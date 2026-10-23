@@ -319,3 +319,31 @@ def test_one_dominant_mark_does_not_make_repressive_states_quiescent():
     assert labels[1] == "Het"
     assert labels[2].startswith("ReprPC") and labels[3].startswith("ReprPC")
     assert labels[4] == "TssA"
+
+
+def test_enrichment_naming_on_a_real_genome_profile():
+    """CD8 T-cell model (4 marks, 15 states): weak states are named by what they carry.
+
+    With a dominant active-promoter state, scaling to the strongest state called weak
+    Polycomb and weak H3K9me3 states quiescent. Fold enrichment over the genome-wide
+    background (occupancy-weighted) names them correctly.
+    """
+    from chromstate.model.annotate import annotate_states
+
+    marks = ["H3K4me3", "H3K27ac", "H3K27me3", "H3K9me3"]
+    M = np.array([
+        [0.0, 0.0, 0.0, 0.0], [0.8, 0.3, 0.8, 2.2], [1.7, 0.4, 2.4, 0.5],
+        [0.6, 0.2, 0.2, 5.6], [4.1, 1.8, 0.6, 0.3], [2.5, 0.4, 8.2, 0.5],
+        [5.4, 1.3, 5.2, 0.4], [1.7, 0.6, 3.3, 7.1], [0.8, 0.3, 0.3, 11.9],
+        [5.1, 0.8, 18.8, 0.5], [16.6, 7.6, 1.2, 0.5], [8.8, 0.9, 47.4, 0.6],
+        [62.9, 5.0, 36.2, 0.6], [21.6, 9.9, 4.3, 69.7], [114.8, 36.6, 2.4, 0.8],
+    ])
+    occupancy = np.array([2.85, 8.22, 10.81, 15.36, 12.20, 9.72, 4.76, 5.85, 16.49,
+                          6.57, 2.44, 2.82, 0.50, 0.09, 1.31])
+    labels, _, rules = annotate_states(M, marks, occupancy=occupancy)
+    base = [lbl.split("_")[0] for lbl in labels]
+    assert base[0] == "Quies"
+    assert base[5] == "ReprPCWk" and base[9] == "ReprPC" and base[11] == "ReprPC"
+    assert base[8] == "HetWk" and base[13] == "Het"
+    assert base[10] == "TssFlnk" and base[12] == "TssBiv" and base[14] == "TssA"
+    assert "H3K4me3 26.1x" in rules[14]

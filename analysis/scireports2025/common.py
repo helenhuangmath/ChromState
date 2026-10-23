@@ -22,6 +22,9 @@ RNA_COUNTS = DATA / "RNA" / "Data" / "ReadCounts" / "RawRC_RNA.featureCounts_s2.
 CHROMHMM_DIR = DATA / "ChromHMM" / "UseConcatenate_noCTCF_15S"
 CHROMHMM_RELABEL = DATA / "ChromHMM" / "relabel_map.txt"
 POISED_DIR = DATA / "Bivalent" / "Use_K4me3_K27me3"
+# ATAC-seq union peaks with mean normalised counts per condition (Mean_Naive, Mean_Arm,
+# Mean_Cl13). Memory and exhausted ATAC are day 27, CUT&RUN day 30/32.
+ATAC_PEAKS = DATA / "ATAC" / "Meta_ATAC_AllPeak_wMeanRC.wAnno.mm10.txt"
 
 CONDITIONS = ["Naive", "Arm", "Cl13"]
 CHROMHMM_PREFIX = {"Naive": "1_Naive", "Arm": "2_Arm", "Cl13": "3_Cl13"}

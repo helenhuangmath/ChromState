@@ -246,3 +246,121 @@ def rank_traceable_genes(
     cols = [c for c in ["gene_id", "name", "tv_distance", "log2fc", "joint_score",
                         "direction", "top_gain", "top_loss", "n_bins"] if c in sub.columns]
     return sub.sort_values("joint_score", ascending=False).head(n)[cols].reset_index(drop=True)
+
+
+# ---------------------------------------------------------------------------
+# Enhancers
+# ---------------------------------------------------------------------------
+
+
+def link_enhancer_expression(
+    pair_change: pd.DataFrame,
+    rna_change: pd.DataFrame,
+    lfc_col: str = "log2fc",
+    how: str = "inner",
+) -> pd.DataFrame:
+    """Attach each linked gene's expression change to its element-gene pairs.
+
+    ``pair_change`` is :func:`chromstate.enhancers.abc_change` output. As with
+    :func:`link_expression`, the join is reported in ``.attrs`` (``n_pairs``,
+    ``n_genes``, ``n_genes_joined``) rather than assumed.
+    """
+    if lfc_col not in rna_change.columns:
+        raise ValueError(f"rna_change has no {lfc_col!r} column; found {list(rna_change.columns)}")
+    merged = pair_change.merge(
+        rna_change[["gene_id", lfc_col]].rename(columns={lfc_col: "log2fc"}),
+        on="gene_id", how=how,
+    )
+    merged.attrs.update(pair_change.attrs)
+    n_genes = int(pair_change["gene_id"].nunique())
+    n_joined = int(merged["gene_id"].nunique())
+    merged.attrs.update({"n_pairs": int(len(merged)), "n_genes": n_genes,
+                         "n_genes_joined": n_joined})
+    if n_joined < 0.5 * min(n_genes, rna_change["gene_id"].nunique()):
+        merged.attrs["warning"] = (
+            f"Only {n_joined} of {n_genes} linked genes joined to the expression table. "
+            f"Check identifier types before reading anything into the result."
+        )
+    return merged
+
+
+def enhancer_expression_association(
+    linked: pd.DataFrame,
+    rings: Optional[Sequence[int]] = None,
+    n_permutations: int = 1000,
+    seed: int = 0,
+    fdr: float = 0.05,
+    pseudocount: Optional[float] = None,
+) -> AssociationResult:
+    """Does a gene's change in enhancer input track its change in expression, by distance?
+
+    The unit is the **gene**, not the pair. For each distance ring, a gene's distal input
+    (summed ``abc_raw`` of its distal elements in that ring) is compared between the two
+    groups as a log2 fold change, and correlated with the gene's ``log2fc``. Correlating
+    pairs directly would count a gene with 40 linked elements 40 times, and the
+    permutation null would then be far too narrow.
+
+    Rows: one per ring, ``all_distal``, and ``own_promoter`` for reference. Genes with no
+    element in a ring are left out of that ring. A real enhancer signal should be
+    positive and fall with distance; a flat profile out to 500 kb is a warning that the
+    association is coming from domain-scale co-regulation rather than from the elements.
+    """
+    from .enhancers import DEFAULT_RINGS, _ring_index
+
+    rings = tuple(rings) if rings is not None else DEFAULT_RINGS
+    need = {"gene_id", "element_type", "distance", "abc_raw_a", "abc_raw_b", "log2fc"}
+    if not need <= set(linked.columns):
+        raise ValueError(f"linked table needs {sorted(need - set(linked.columns))}; "
+                         f"run abc_change then link_enhancer_expression")
+
+    if pseudocount is None:
+        pseudocount = float(linked.attrs.get("pseudocount", 0.0)) or 1e-3
+
+    ring = _ring_index(linked["distance"].to_numpy(), rings)
+    distal = (linked["element_type"] == "distal").to_numpy()
+    groups = [(f"{lo // 1000}-{hi // 1000} kb", distal & (ring == r))
+              for r, (lo, hi) in enumerate(zip(rings[:-1], rings[1:]))]
+    groups += [("all_distal", distal & (ring >= 0)),
+               ("own_promoter", (linked["element_type"] == "own_promoter").to_numpy())]
+
+    rng = np.random.default_rng(seed)
+    rows = []
+    for name, sel in groups:
+        sub = linked.loc[sel]
+        per_gene = sub.groupby("gene_id").agg(a=("abc_raw_a", "sum"), b=("abc_raw_b", "sum"),
+                                              log2fc=("log2fc", "first"))
+        per_gene = per_gene.loc[(per_gene["a"] + per_gene["b"]) > 0]
+        if len(per_gene) < 3:
+            rows.append({"set": name, "spearman": np.nan, "pvalue": np.nan,
+                         "n_genes": int(len(per_gene))})
+            continue
+        x = np.log2((per_gene["b"] + pseudocount) / (per_gene["a"] + pseudocount)).to_numpy()
+        y = per_gene["log2fc"].to_numpy(dtype=float)
+        rho = _spearman(x, y)
+        null = np.array([_spearman(x, y[rng.permutation(len(y))]) for _ in range(n_permutations)])
+        rows.append({
+            "set": name,
+            "spearman": rho,
+            "pvalue": float((np.sum(np.abs(null) >= abs(rho)) + 1.0) / (n_permutations + 1.0)),
+            "n_genes": int(len(per_gene)),
+            "null_sd": float(np.nanstd(null)),
+        })
+
+    from .dynamics import benjamini_hochberg
+
+    table = pd.DataFrame(rows)
+    ok = table["pvalue"].notna()
+    table["qvalue"] = np.nan
+    table.loc[ok, "qvalue"] = benjamini_hochberg(table.loc[ok, "pvalue"].to_numpy())
+    table["significant"] = table["qvalue"] < fdr
+
+    n_genes = int(linked["gene_id"].nunique())
+    note = (
+        f"Spearman correlation, across genes, between the log2 change in each gene's summed "
+        f"enhancer input (activity x contact) and its expression change, per distance ring, "
+        f"with a null from {n_permutations} gene-label shuffles; {n_genes} genes. An "
+        f"association: it does not show that any element drives its gene."
+    )
+    if "warning" in linked.attrs:
+        note += " " + str(linked.attrs["warning"])
+    return AssociationResult(table, n_genes, n_permutations, note)

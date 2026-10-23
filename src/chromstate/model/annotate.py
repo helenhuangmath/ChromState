@@ -30,6 +30,7 @@ STATE_COLORS: Dict[str, str] = {
     "ReprPC": "#808080",
     "ReprPCWk": "#C0C0C0",
     "Het": "#8A91D0",
+    "HetWk": "#C5C9E8",
     "ZNF/Rpts": "#66CDAA",
     "Quies": "#F5F5F5",
     "Unknown": "#DDDDDD",
@@ -51,6 +52,7 @@ STATE_FULL_NAMES: Dict[str, str] = {
     "ReprPC": "Polycomb repressed",
     "ReprPCWk": "Weakly Polycomb repressed",
     "Het": "Heterochromatin",
+    "HetWk": "Weak heterochromatin",
     "ZNF/Rpts": "Zinc-finger genes and repeats",
     "Quies": "Quiescent, low signal",
     "Unknown": "Unclassified state",
@@ -110,14 +112,102 @@ def canonical_mark(name: str) -> str:
     return MARK_ALIASES.get(key, name)
 
 
+#: A mark is *present* in a state at >= PRESENT_FOLD x its genome-wide mean, or at
+#: >= PRESENT_FRAC of its strongest state; *strong* at STRONG_FOLD / STRONG_FRAC.
+#: Two scales because each fails alone: on a real genome active states cover ~1-3%, so
+#: the genome mean is near background and fold enrichment reads naturally; when states
+#: cover similar shares (small panels, simulations) the mean is inflated by the active
+#: states, and the fraction of the strongest state is what still separates them.
+PRESENT_FOLD = 1.5
+STRONG_FOLD = 4.0
+PRESENT_FRAC = 0.25
+STRONG_FRAC = 0.35
+
+
+def _annotate_by_enrichment(
+    M: np.ndarray, marks: Sequence[str], occupancy: np.ndarray
+) -> Tuple[List[str], List[str]]:
+    """Name states from each mark's fold enrichment over its genome-wide mean.
+
+    The genome-wide mean of a mark is the occupancy-weighted average of the state means,
+    i.e. what an average bin carries. Enrichment relative to that background is how a
+    biologist reads a state ("H3K27me3 4x over background"), and unlike scaling to the
+    strongest state it is not distorted when one state (an active promoter) dominates a
+    mark's dynamic range. Rules run in order; the first match names the state.
+    """
+    occ = np.asarray(occupancy, dtype=np.float64)
+    occ = occ / max(occ.sum(), 1e-12)
+    background = np.maximum((occ[:, None] * M).sum(axis=0), 1e-12)
+    F = M / background
+    R = M / np.maximum(M.max(axis=0, keepdims=True), 1e-12)
+    canon = [canonical_mark(m) for m in marks]
+    idx = {c: j for j, c in enumerate(canon)}
+
+    def f(k: int, mark: str) -> float:
+        return float(F[k, idx[mark]]) if mark in idx else 0.0
+
+    def r(k: int, mark: str) -> float:
+        return float(R[k, idx[mark]]) if mark in idx else 0.0
+
+    def strongest(k: int) -> str:
+        return canon[int(np.argmax(F[k]))]
+
+    labels: List[str] = []
+    rules: List[str] = []
+    for k in range(M.shape[0]):
+        present = lambda m, k=k: f(k, m) >= PRESENT_FOLD or r(k, m) >= PRESENT_FRAC  # noqa: E731
+        strong = lambda m, k=k: f(k, m) >= STRONG_FOLD or r(k, m) >= STRONG_FRAC  # noqa: E731
+        if not any(present(m) for m in canon):
+            name = "Quies"
+        elif strong("K4me3") and strong("K27me3"):
+            name = "TssBiv"
+        elif strong("K9me3") and strongest(k) == "K9me3":
+            name = "Het"
+        elif strong("K4me3"):
+            name = "TssA"
+        elif strong("K36me3") and strongest(k) == "K36me3":
+            name = "Tx"
+        elif present("K27ac") and present("K4me1") and f(k, "K4me1") > f(k, "K4me3"):
+            name = "EnhA"
+        elif present("K4me3") and (present("K27ac") or present("K4me1")):
+            name = "TssFlnk"
+        elif present("K27ac") and not present("K4me3"):
+            name = "EnhA"
+        elif present("K4me1"):
+            name = "EnhWk"
+        elif strong("K27me3"):
+            name = "ReprPC"
+        elif present("K4me3") and present("K27me3"):
+            name = "BivFlnk"
+        elif present("K27me3"):
+            name = "ReprPCWk"
+        elif present("K9me3"):
+            name = "HetWk"
+        elif present("K36me3"):
+            name = "TxWk"
+        else:
+            name = "Unknown"
+        enriched = [f"{marks[j]} {F[k, j]:.1f}x" for j in np.argsort(-F[k])
+                    if F[k, j] >= PRESENT_FOLD or R[k, j] >= PRESENT_FRAC]
+        labels.append(name)
+        rules.append("fold over genome mean: " + (", ".join(enriched) if enriched else "no mark enriched"))
+    return labels, rules
+
+
 def annotate_states(
     mean_matrix: np.ndarray,
     marks: Sequence[str],
     high_frac: float = 0.35,
     low_frac: float = 0.20,
     quiet_frac: float = 0.15,
+    occupancy: Optional[np.ndarray] = None,
 ) -> Tuple[List[str], List[str], List[str]]:
     """Assign a mnemonic, colour, and matched-rule string to each state.
+
+    With ``occupancy`` (each state's share of the genome; ``fit`` always supplies it),
+    states are named from fold enrichment over the genome-wide background -- the
+    recommended mode, see :func:`_annotate_by_enrichment`. Without it, the legacy rules
+    below scale each mark to its strongest state.
 
     Parameters
     ----------
@@ -149,6 +239,12 @@ def annotate_states(
     appending an index when a rule matches more than one state.
     """
     M = np.asarray(mean_matrix, dtype=np.float64)
+    if occupancy is not None:
+        raw, rules = _annotate_by_enrichment(M, marks, occupancy)
+        labels = _uniquify(raw)
+        colors = [STATE_COLORS.get(lbl.split("_")[0], STATE_COLORS["Unknown"]) for lbl in labels]
+        return labels, colors, rules
+
     K = M.shape[0]
     canon = [canonical_mark(m) for m in marks]
 
