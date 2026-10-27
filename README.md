@@ -555,26 +555,39 @@ Two tutorials work through ChromState in detail.
 ## 7. Comparison with external tools
 
 [Tutorial 1](docs/tutorials/01_simulation.md) compares statistical models on identical input. `tools/` runs the **actual
-software** on ChromState's bins:
-- Real ChromHMM is enabled by setting `CHROMHMM_JAR=/path/to/ChromHMM.jar`.
-- EpiCSeg, Segway, epigenome-ssm and other tools are configured through command
-  templates in `tools/tools.json`.
+software** on ChromState's bins and scores every tool with one metric registry. The
+measured comparison, with caveats, is in [docs/tool_comparison.md](docs/tool_comparison.md).
 
-Each tool's output is mapped back onto the bin grid by coordinate and scored with a
-common metric registry:
+| Tool | Status in `tools/` |
+|---|---|
+| ChromHMM 1.28 | real software, verified |
+| EpiCSeg 1.0 | real software, verified (two compatibility patches for current R) |
+| normR 1.36.0 | real software, verified; per-mark enrichment, scored on mark patterns and bivalency |
+| diHMM (C++) | real software, verified after three upstream bug fixes; a lower bound |
+| Segway | not run: needs Linux (GMTK), and Docker was unavailable on the test machine |
+| epigenome-ssm | command template only, disabled |
+
+On simulated data (200,000 bins, 7 true states) ChromState had the highest state recovery
+(adjusted Rand index 0.84 against 0.74 for ChromHMM and 0.72 for EpiCSeg) and the best
+calibrated posteriors. EpiCSeg detected bivalent bins better (AUPRC 0.685 against
+0.634). The simulation draws counts from ChromState's own model family, so it favours
+ChromState; read [§3 of the comparison](docs/tool_comparison.md) before quoting a number.
+
+Each tool's output is mapped back onto the bin grid by coordinate and scored with:
 - **Truth-based metrics** (simulation): adjusted Rand index, matched accuracy,
   bivalency AUPRC, magnitude correlation and calibration.
 - **Truth-free metrics** (real data): segment length and number, coverage, posterior
   decisiveness, pairwise agreement, runtime and memory.
 
 ```bash
+bash tools/setup/setup_env.sh                              # conda env with the external tools
 python tools/run_tools.py check                            # which tools can run here
 python tools/run_tools.py run -o compare_out               # simulated data, all metrics
 python tools/run_tools.py run -o out --counts counts.tsv   # real data, truth-free metrics
+python tools/scaling.py                                    # runtime and memory against size
 ```
 
-The adapters for EpiCSeg, Segway and epigenome-ssm are **disabled and unverified** until
-each has been run against the real software. See [`tools/README.md`](tools/README.md).
+See [`tools/README.md`](tools/README.md) for per-tool setup.
 
 ---
 
