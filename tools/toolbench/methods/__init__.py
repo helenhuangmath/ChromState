@@ -4,7 +4,10 @@
 |---|---|---|
 | :mod:`~toolbench.methods.internal` | ChromState, ChromHMM-like, Segway-like, Gaussian mixture, k-means, naive signal | the *statistical model*, on identical bins |
 | :mod:`~toolbench.methods.chromhmm` | real ChromHMM (``LearnModel``) | the *published software* |
-| :mod:`~toolbench.methods.configured` | anything in ``tools.json`` — EpiCSeg, Segway, epigenome-ssm, your own | the *published software*, once you have checked its command line |
+| :mod:`~toolbench.methods.epicseg` | real EpiCSeg (``normalizecounts`` + ``segment``) | the *published software* |
+| :mod:`~toolbench.methods.normr` | real normR (``enrichR`` per mark) | the published software, on patterns and bivalency only |
+| :mod:`~toolbench.methods.dihmm` | real diHMM (ykai16 C++ build) | the *published software*, nucleosome level |
+| :mod:`~toolbench.methods.configured` | anything in ``tools.json`` — Segway, epigenome-ssm, your own | the *published software*, once you have checked its command line |
 
 Importing this package registers all of them, so ``toolbench check`` and the runner see
 one flat namespace of method keys regardless of which module a method came from.
@@ -20,14 +23,14 @@ from __future__ import annotations
 from typing import List
 
 from ..core import ToolAdapter, register
-from . import chromhmm, configured, internal
+from . import chromhmm, configured, dihmm, epicseg, internal, normr
 from .chromhmm import ChromHMMAdapter
 from .configured import TOOLS_JSON, ExternalCommandAdapter, load_specs
 from .internal import INTERNAL_METHODS, InternalAdapter
 
 #: Modules contributing methods, in the order they appear in every table and figure.
 #: In-process first (they always run), then real software.
-METHOD_MODULES = [internal, chromhmm, configured]
+METHOD_MODULES = [internal, chromhmm, epicseg, normr, dihmm, configured]
 
 __all__ = [
     "INTERNAL_METHODS",

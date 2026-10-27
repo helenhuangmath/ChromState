@@ -1,0 +1,11 @@
+--- Forward_Backward.cpp
++++ Forward_Backward.cpp
+@@ -286,7 +286,7 @@
+       }
+     } else {
+       const rowvec emissions = m.emission_probabilities_row(observation);
+-      const mat b_e = (b.each_col() % emissions);
++      const mat b_e = (b.each_col() % emissions.t());
+
+       for (int dest_domain = 0; dest_domain < m.n_domain_states;
+            dest_domain++) {

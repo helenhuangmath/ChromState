@@ -20,7 +20,7 @@ import pandas as pd
 
 from chromstate import viz
 
-__all__ = ["write_report", "plot_tool_comparison", "plot_agreement_heatmap",
+__all__ = ["write_report", "plot_tool_comparison", "plot_agreement_heatmap", "plot_scaling",
            "TOOL_METRIC_LABELS"]
 
 #: Spelled-out panel titles for the columns this harness adds on top of
@@ -130,6 +130,41 @@ def plot_calibration_curves(runs: Sequence, truth) -> Optional[plt.Figure]:
     return viz.plot_calibration(posteriors, correct, figsize=(8.0, 5.4))
 
 
+def plot_scaling(table: pd.DataFrame):
+    """Runtime and peak memory against total bin-rows, one line per tool, log-log.
+
+    Points that did not run (timeout, failure) are simply absent from a line rather than
+    drawn at an invented value; the table beside the figure says why.
+    """
+    fig, axes = plt.subplots(1, 2, figsize=(viz.WIDTH_DOUBLE, 2.6), facecolor=viz.SURFACE)
+    ok = table.loc[table["status"] == "ok"].copy()
+    panels = [("runtime_s", "Runtime (seconds)"), ("peak_rss_mb", "Peak memory (megabytes)")]
+    for ax, (col, label) in zip(axes, panels):
+        viz._style_axes(ax, grid_axis="both")
+        for i, (_tool, grp) in enumerate(ok.groupby("tool", sort=False)):
+            grp = grp.dropna(subset=[col]).sort_values("total_bin_rows")
+            if grp.empty:
+                continue
+            name = str(grp["method"].iloc[0]).split(" (")[0]
+            color = viz.CVD_PALETTE[i % len(viz.CVD_PALETTE)]
+            ax.plot(grp["total_bin_rows"], grp[col], marker="o", markersize=2.5,
+                    linewidth=0.9, color=color, label=name)
+        ax.set_xscale("log")
+        ax.set_yscale("log")
+        ax.set_xlabel("Bins in the dataset (all samples)", fontsize=viz.FS_LABEL)
+        ax.set_ylabel(label, fontsize=viz.FS_LABEL)
+    viz._title(axes[0], "Runtime against dataset size",
+               "wall clock per tool; external tools timed as subprocesses, in-process "
+               "methods timed around fit and decode")
+    viz._title(axes[1], "Peak memory against dataset size",
+               "external tools: their process tree; in-process methods: the whole child "
+               "interpreter, including the simulated data")
+    axes[1].legend(frameon=False, fontsize=viz.FS_LEGEND, loc="upper left",
+                   bbox_to_anchor=(1.0, 1.0))
+    fig.tight_layout()
+    return fig
+
+
 def _markdown_table(frame: pd.DataFrame, floatfmt: str = "{:.3f}") -> str:
     def fmt(v):
         if isinstance(v, float):
@@ -181,7 +216,8 @@ def write_report(
     not_ok = table.loc[table["status"] != "ok"]
     unverified = ok.loc[~ok["verified"].astype(bool), "method"].tolist() if "verified" in ok else []
 
-    show = [c for c in ["method", "ari", "matched_accuracy", "biv_auprc", "signal_spearman",
+    show = [c for c in ["method", "ari", "matched_accuracy", "biv_auprc", "biv_posthoc_auprc",
+                        "signal_spearman",
                         "bin_coverage", "mean_segment_kb", "occupancy_entropy",
                         "frac_saturated", "runtime_s"] if c in ok.columns]
 

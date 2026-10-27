@@ -66,10 +66,15 @@ def test_every_compared_method_comes_from_the_methods_folder():
         assert module.build(), f"{module.__name__}.build() returned nothing"
 
 
-def test_external_tools_are_registered_but_flagged_unverified():
+def test_external_tools_are_registered_and_flagged_honestly():
     table = availability_table().set_index("tool")
-    assert "chromhmm" in table.index
-    assert not bool(table.loc["chromhmm", "verified"])
+    # These adapters were executed against the real software (see docs/tool_comparison.md).
+    for key in ("chromhmm", "epicseg", "normr", "dihmm"):
+        assert key in table.index
+        assert bool(table.loc[key, "verified"]), key
+    # Command templates in tools.json have not been, and must say so.
+    for key in ("segway", "epigenome_ssm"):
+        assert not bool(table.loc[key, "verified"]), key
     # An unavailable tool must still explain itself.
     for key in table.index[~table["available"].astype(bool)]:
         assert table.loc[key, "detail"]
