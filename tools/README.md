@@ -14,7 +14,7 @@ tools/
   tools.json       external tools: command template + output parser, disabled until configured
   toolbench/
     methods/       EVERY COMPARED METHOD LIVES HERE
-      internal.py    ChromState, ChromHMM-like, Segway-like, GMM, k-means, naive signal
+      internal.py    ChromState, ChromHMM-, Segway-, EpiCSeg-, EpiSegMix-, diHMM-, normR-like, GMM, k-means, naive
       chromhmm.py    real ChromHMM (java -jar ChromHMM.jar LearnModel)
       configured.py  anything described by a command template in tools.json
       __init__.py    assembles the registry from the modules above
@@ -61,7 +61,13 @@ metric compares against), `--per-bin` to dump every tool's call per bin for IGV.
 | **real ChromHMM** | `java -jar ChromHMM.jar LearnModel` on the same bins | evidence about the tool; enable with `CHROMHMM_JAR` |
 | **configured** | anything in `tools.json`: command template + output parser | evidence about the tool, once you have checked the command |
 
-Every external adapter ships with `verified: false`, and `check` prints it. It means the
+The real-ChromHMM adapter is **verified**: it has been run against ChromHMM 1.27
+(`jernst98/ChromHMM`) on simulated bins, which is how the `-noenrich` flag was found to be
+necessary (`LearnModel` writes the segmentation and posteriors, then aborts in enrichment
+when the bins do not match the named assembly). It also reads `emissions_K.txt` to give
+real ChromHMM a bivalency and activity score with the same formula as every other method.
+
+Every other external adapter ships with `verified: false`, and `check` prints it. It means the
 command line was transcribed from the tool's published documentation and has **not** been
 executed against the real software in this repository. Run `--dry-run` first, read the
 command, fix `tools.json` if the installed version disagrees, and flip `verified` to true

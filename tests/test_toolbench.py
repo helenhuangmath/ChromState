@@ -66,10 +66,14 @@ def test_every_compared_method_comes_from_the_methods_folder():
         assert module.build(), f"{module.__name__}.build() returned nothing"
 
 
-def test_external_tools_are_registered_but_flagged_unverified():
+def test_external_tools_are_registered_and_flagged():
     table = availability_table().set_index("tool")
     assert "chromhmm" in table.index
-    assert not bool(table.loc["chromhmm", "verified"])
+    # Real ChromHMM has been run through the harness; the command-template tools have not.
+    assert bool(table.loc["chromhmm", "verified"])
+    for key in ("epicseg", "segway", "episegmix", "dihmm", "normr"):
+        assert key in table.index
+        assert not bool(table.loc[key, "verified"])
     # An unavailable tool must still explain itself.
     for key in table.index[~table["available"].astype(bool)]:
         assert table.loc[key, "detail"]

@@ -16,6 +16,7 @@ import shutil
 from typing import List, Optional
 
 import numpy as np
+import pandas as pd
 
 from ..core import Availability, ToolAdapter, ToolRun, probe_version, run_command
 from ..io_formats import export_chromhmm_binary, labels_from_segmentation_bed
@@ -36,7 +37,7 @@ class ChromHMMAdapter(ToolAdapter):
     key = "chromhmm"
     display_name = "ChromHMM (real, LearnModel)"
     kind = "external"
-    verified = False
+    verified = True  # run against ChromHMM 1.27 (jernst98/ChromHMM) on simulated bins, Oct 2026
     stands_for = "the actual published tool"
 
     def availability(self) -> Availability:
@@ -60,7 +61,10 @@ class ChromHMMAdapter(ToolAdapter):
         return [
             shutil.which("java") or "java", "-mx4000M",
             "-jar", os.environ.get("CHROMHMM_JAR", "<$CHROMHMM_JAR-unset>"), "LearnModel",
-            "-b", str(bin_size), "-nobrowser", "-noimage", "-printposterior",
+            # -noenrich: LearnModel otherwise runs enrichment against the assembly's
+            # bundled annotation and aborts when the bins (e.g. simulated chromosomes)
+            # do not match it -- after the segmentation and posteriors are written.
+            "-b", str(bin_size), "-nobrowser", "-noimage", "-noenrich", "-printposterior",
             "-r", "200", "-s", str(seed),
             indir, outdir, str(n_states), os.environ.get("CHROMHMM_ASSEMBLY", "hg19"),
         ]
@@ -107,12 +111,16 @@ class ChromHMMAdapter(ToolAdapter):
                 command=res.command, workdir=workdir, runtime_s=res.runtime_s,
             )
 
+        posterior = read_posterior(ds, outdir, n_states)
+        bivalency, activity = scores_from_emissions(ds, outdir, n_states, posterior)
         return ToolRun(
             tool=self.key,
             display_name=self.display_name,
             status="ok",
             states=states,
-            posterior=read_posterior(ds, outdir, n_states),
+            posterior=posterior,
+            bivalency_score=bivalency,
+            activity_score=activity,
             n_states=max(len(vocab), n_states),
             runtime_s=res.runtime_s,
             peak_rss_mb=res.peak_rss_mb,
@@ -122,6 +130,39 @@ class ChromHMMAdapter(ToolAdapter):
             verified=self.verified,
             notes=f"segments read for {found}/{len(ds.samples)} samples",
         )
+
+
+def scores_from_emissions(ds, outdir: str, n_states: int, posterior: Optional[np.ndarray]):
+    """Bivalency and activity scores for real ChromHMM, with the benchmark's shared formula.
+
+    ChromHMM's ``emissions_K.txt`` gives each state's presence probability per mark. As in
+    the ChromHMM-like baseline, these are mapped onto the count scale with each mark's mean
+    count among bins called present, and then the same state-level bivalency and activity
+    formulas are applied and weighted by the posterior. Returns ``(None, None)`` when the
+    emissions or posterior are unavailable, so the metrics report NaN rather than a guess.
+    """
+    from chromstate.benchmark.baselines import _state_activity, _state_bivalency
+    from chromstate.model.binarize import poisson_binarize
+
+    path = os.path.join(outdir, f"emissions_{n_states}.txt")
+    if posterior is None or not os.path.exists(path):
+        return None, None
+    try:
+        frame = pd.read_csv(path, sep="\t")
+    except Exception:
+        return None, None
+    frame = frame.set_index(frame.columns[0])
+    missing = [m for m in ds.marks if m not in frame.columns]
+    if missing or frame.shape[0] != posterior.shape[1]:
+        return None, None
+    probs = frame[list(ds.marks)].to_numpy(dtype=float)  # (K, M) presence probability
+    B = poisson_binarize(ds.X, control=getattr(ds, "control", None))
+    present_mean = np.array(
+        [ds.X[B[:, j] > 0, j].mean() if (B[:, j] > 0).any() else 0.0 for j in range(ds.n_marks)]
+    )
+    pseudo_means = probs * present_mean[None, :]
+    return (posterior @ _state_bivalency(pseudo_means, ds.marks),
+            posterior @ _state_activity(pseudo_means, ds.marks))
 
 
 def read_posterior(ds, outdir: str, n_states: int) -> Optional[np.ndarray]:

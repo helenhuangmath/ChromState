@@ -303,19 +303,32 @@ with one metric registry — truth-based metrics on simulated data, truth-free o
 (segment shape, coverage, posterior decisiveness, pairwise agreement, runtime, memory) on
 real data. Tools that are absent or crash stay in the table with a reason.
 
-The adapters for EpiCSeg, Segway, and epigenome-ssm ship **disabled and unverified**:
+**Real ChromHMM has been run through the harness** (ChromHMM 1.27 from
+`jernst98/ChromHMM`, October 2026): the adapter needed `-noenrich`, because `LearnModel`
+otherwise aborts in its post-hoc enrichment step on chromosomes that do not match the
+named assembly, *after* writing the segmentation. Results over three seeds are in
+Tutorial 1 §7.1; real ChromHMM scores above its reimplementation on every metric, and its
+bivalency detection is the least stable number in the table (AUPRC 0.21–0.73).
+
+The adapters for EpiCSeg, Segway, epigenome-ssm, EpiSegMix, diHMM and normR ship
+**disabled and unverified**:
 their command lines are transcribed from published documentation and have not been run
 against the real software here. That flag is printed by `toolbench check` and repeated in
 every report, and it should stay set until someone has watched each tool run.
 
 ### Still required before publication
 
-1. Re-run the ChromHMM row against **real ChromHMM**, not the reimplementation
-   (`export CHROMHMM_JAR=... && python tools/run_tools.py run --tools chromstate,chromhmm`).
+1. ~~Re-run the ChromHMM row against **real ChromHMM**~~ — done on simulated data
+   (Tutorial 1 §7.1); still to be done on real data (item 2).
 2. Re-run the whole comparison on **real data** — Roadmap/ENCODE with published
    segmentations, and reChIP-seq bivalency as orthogonal ground truth.
 3. Add **epigenome-ssm** and **EpiCSeg** as rows. They are the closest prior art (§0) and
-   their absence is the most obvious gap a reviewer will name.
+   their absence is the most obvious gap a reviewer will name. *Partly addressed:*
+   EpiCSeg's negative multinomial, EpiSegMix's zero-inflated NB, diHMM's two-level
+   structure and normR's enrichment calling are reimplemented as `epicseg_like`,
+   `episegmix_like`, `dihmm_like` and `normr_like` on identical bins, and disabled
+   adapters for the real EpiSegMix, diHMM and normR are in `tools/tools.json`.
+   epigenome-ssm and the real EpiSegMix/diHMM/normR software still need to be run.
 4. Fix or honestly caveat **posterior calibration**. *Partly addressed:* `calibrate.py`
    fits a temperature against replicate reproducibility (real data) or known labels
    (simulation) and cuts saturated calls from ~85% to ~65-73% with the calibration error
@@ -323,6 +336,11 @@ every report, and it should stay set until someone has watched each tool run.
    independence across marks — and a reproducibility criterion cannot detect a bias that
    every replicate shares.
 5. Report **variability across seeds and simulation parameters**, not a single run.
+   *Partly addressed:* Tutorial 1 §7.1 reports mean ± s.d. over three seeds; simulation
+   parameters (blur, dispersion, depth) have not been swept.
+6. Run `compare_algorithms` and `state_importance` on the **CD8 data** and report the
+   held-out likelihood of `nb` versus `zinb` and the state ranking with intervals, so
+   that the method-level validation in Tutorial 1 §7.2–7.3 has a real-data counterpart.
 
 ---
 
@@ -387,8 +405,8 @@ letter apart. Strongly consider renaming both together.
 
 ## 9. Implementation status (v0.1)
 
-84 Python tests and 24 R tests pass. `chromstate demo -o demo_out` runs the whole thing
-end to end in ~24 s and writes 13 figures, 11 tables, and a report.
+174 Python tests and 24 R tests pass. `chromstate demo -o demo_out` runs the whole thing
+end to end in ~9 s and writes 13 figures, 12 tables, and a report.
 
 ### Built
 
@@ -397,8 +415,10 @@ end to end in ~24 s and writes 13 figures, 11 tables, and a report.
 | Genome binning, blacklist | `genome.py` | done — 200 bp default, ChromHMM-compatible |
 | IO: BAM / BED reads / peak BED | `io/` | done — reads ChromHMM's `cellmarkfiletable` unchanged |
 | Normalisation: depth, median-of-ratios, spike-in | `norm.py` | done |
-| NB / Bernoulli / Gaussian emissions | `model/emissions.py` | done |
-| HMM: scaled forward-backward, Baum-Welch, Viterbi | `model/hmm.py` | done, numba-accelerated |
+| NB / ZINB / Poisson / negative-multinomial / Bernoulli / Gaussian emissions, tied (hierarchical) wrapper | `model/emissions.py` | done — single-pass pair tables |
+| HMM: fused chain-parallel forward-backward, Baum-Welch, Viterbi | `model/hmm.py` | done, numba `prange` over chromosomes; reference path kept and tested equal |
+| Algorithm selection (held-out likelihood, calibration, fragmentation, runtime) and E-step speed benchmark | `benchmark/algorithms.py` | done |
+| State importance for expression: permutation, closed drop-one, ridge coefficients, bootstrap CIs; representation comparison; planted-effect simulator | `importance.py`, `simulate.py` | done — validated against planted effects |
 | Automatic state mnemonics + Roadmap colours | `model/annotate.py` | done |
 | Model selection by held-out likelihood | `model/core.py` | done |
 | Composition, entropy, margin, bivalency, attribution | `quantify.py` | done |
@@ -407,9 +427,9 @@ end to end in ~24 s and writes 13 figures, 11 tables, and a report.
 | Posterior calibration by temperature scaling | `calibrate.py` | done — v0.2 |
 | Genes, promoters, bin-to-feature mapping, per-gene trace | `features.py` | done — v0.2 |
 | RNA join, per-state association, traceable-gene ranking | `rna.py` | done — v0.2 |
-| Benchmark harness + 6 methods + metrics | `benchmark/` | done |
+| Benchmark harness + 10 methods (incl. EpiCSeg-, EpiSegMix-, diHMM-, normR-like) + metrics | `benchmark/` | done |
 | Figures (ChromHMM-standard + ChromState-specific) | `viz.py` | done — 13 figures |
-| CLI (`fit`, `selectk`, `compare`, `demo`, `export-chromhmm`) | `cli.py` | done |
+| CLI (`fit [--gtf --expression]`, `selectk`, `compare`, `demo`, `export-chromhmm`) | `cli.py` | done |
 | R wrapper over reticulate | `R/chromstatR/` | done |
 
 ### Not built (per the staged roadmap)

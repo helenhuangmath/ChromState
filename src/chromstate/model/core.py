@@ -171,9 +171,9 @@ def fit(
         be treated with suspicion.
     """
     emission = _resolve_emission(emission, ds)
-    if emission == "nb" and not ds.is_count:
+    if emission in ("nb", "poisson", "zinb", "negative_multinomial") and not ds.is_count:
         raise ValueError(
-            "emission='nb' requires count input (BAM or BED reads). This dataset was "
+            f"emission={emission!r} requires count input (BAM or BED reads). This dataset was "
             "built from peak scores, which are already thresholded, so a negative "
             "binomial dispersion is not meaningful. Use emission='gaussian' instead."
         )

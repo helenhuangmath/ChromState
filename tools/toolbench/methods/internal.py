@@ -1,4 +1,4 @@
-"""The six in-process methods: ChromState and the reimplemented baselines.
+"""The in-process methods: ChromState and the reimplemented baselines.
 
 These are the published *statistical models* -- negative-binomial HMM, binarised
 Bernoulli HMM, Gaussian HMM, Gaussian mixture, k-means, and a no-model signal formula --
@@ -36,6 +36,18 @@ INTERNAL_METHODS = [
     ("segway_like", "segway_like",
      "Segway-like (Gaussian hidden Markov model)",
      "Segway and epigenome-ssm's model family"),
+    ("epicseg_like", "epicseg_like",
+     "EpiCSeg-like (negative multinomial hidden Markov model)",
+     "EpiCSeg's published emission model, reimplemented"),
+    ("episegmix_like", "episegmix_like",
+     "EpiSegMix-like (zero-inflated negative-binomial HMM, geometric durations)",
+     "EpiSegMix's flexible count emission without its duration model"),
+    ("dihmm_like", "dihmm_like",
+     "diHMM-like (hierarchical bin/domain hidden Markov model, flattened)",
+     "diHMM's two-level structure on a count emission"),
+    ("normr_like", "normr_like",
+     "normR-like (per-mark enrichment regimes, no spatial model)",
+     "normR's enrichment calling, combined into states"),
     ("gmm", "gmm",
      "Gaussian mixture model (no spatial model)",
      "isolates what the Markov chain contributes"),

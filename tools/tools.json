@@ -15,22 +15,34 @@
       "display_name": "EpiCSeg (negative multinomial hidden Markov model)",
       "stands_for": "published count-based segmentation; the closest prior art to ChromState's emission model",
       "enabled": false,
-      "requires_env": ["EPICSEG_R"],
+      "requires_env": [
+        "EPICSEG_R"
+      ],
       "requires_binary": "Rscript",
       "input_format": "count_matrix",
       "command": [
-        "Rscript", "{env:EPICSEG_R}", "segment",
-        "--counts", "{counts}",
-        "--regions", "{regions}",
-        "--nstates", "{n_states}",
-        "--outdir", "{outdir}"
+        "Rscript",
+        "{env:EPICSEG_R}",
+        "segment",
+        "--counts",
+        "{counts}",
+        "--regions",
+        "{regions}",
+        "--nstates",
+        "{n_states}",
+        "--outdir",
+        "{outdir}"
       ],
       "output": {
         "format": "segmentation_bed",
         "path": "{outdir}/segmentation.bed",
         "per_sample": false
       },
-      "version_command": ["Rscript", "-e", "cat(as.character(packageVersion('epicseg')))"],
+      "version_command": [
+        "Rscript",
+        "-e",
+        "cat(as.character(packageVersion('epicseg')))"
+      ],
       "verified": false,
       "how_to_enable": "install EpiCSeg (Bioconductor/GitHub), then: export EPICSEG_R=/path/to/epicseg.R and set enabled=true",
       "notes": "EpiCSeg's own counting step is bypassed so it sees ChromState's bins; check that its --counts reader accepts this matrix layout"
@@ -40,21 +52,30 @@
       "display_name": "Segway (dynamic Bayesian network)",
       "stands_for": "the other widely used segmenter; continuous signal, no binarisation",
       "enabled": false,
-      "requires_env": ["SEGWAY_GENOMEDATA"],
+      "requires_env": [
+        "SEGWAY_GENOMEDATA"
+      ],
       "requires_binary": "segway",
       "input_format": "count_matrix",
       "command": [
-        "segway", "train",
-        "--num-labels", "{n_states}",
-        "--seed", "{seed}",
-        "{env:SEGWAY_GENOMEDATA}", "{outdir}/traindir"
+        "segway",
+        "train",
+        "--num-labels",
+        "{n_states}",
+        "--seed",
+        "{seed}",
+        "{env:SEGWAY_GENOMEDATA}",
+        "{outdir}/traindir"
       ],
       "output": {
         "format": "segmentation_bed",
         "path": "{outdir}/identifydir/segway.bed",
         "per_sample": false
       },
-      "version_command": ["segway", "--version"],
+      "version_command": [
+        "segway",
+        "--version"
+      ],
       "verified": false,
       "how_to_enable": "install Segway + GMTK, build a genomedata archive from the exported counts, then: export SEGWAY_GENOMEDATA=/path/to/archive",
       "notes": "two-step tool: `segway train` then `segway identify` writes the BED. Extend this entry or run identify yourself before parsing"
@@ -64,13 +85,18 @@
       "display_name": "epigenome-ssm (continuous state-space model)",
       "stands_for": "continuous chromatin state features; direct prior art for quantitative state scores",
       "enabled": false,
-      "requires_env": ["EPIGENOME_SSM_CMD"],
+      "requires_env": [
+        "EPIGENOME_SSM_CMD"
+      ],
       "input_format": "count_matrix",
       "command": [
         "{env:EPIGENOME_SSM_CMD}",
-        "--input", "{counts}",
-        "--num-features", "{n_states}",
-        "--output", "{outdir}"
+        "--input",
+        "{counts}",
+        "--num-features",
+        "{n_states}",
+        "--output",
+        "{outdir}"
       ],
       "output": {
         "format": "labels",
@@ -80,6 +106,98 @@
       "verified": false,
       "how_to_enable": "install epigenome-ssm, then: export EPIGENOME_SSM_CMD='python -m epigenome_ssm' (or the installed entry point)",
       "notes": "emits continuous features, not labels; you need an argmax/threshold step to produce labels.txt, or compare its features directly"
+    },
+    {
+      "key": "episegmix",
+      "display_name": "EpiSegMix (flexible-distribution hidden semi-Markov model)",
+      "stands_for": "count-based segmentation with per-mark distribution choice and explicit duration modelling; the closest published competitor to ChromState's emission model",
+      "enabled": false,
+      "requires_env": [
+        "EPISEGMIX_CMD"
+      ],
+      "input_format": "count_matrix",
+      "command": [
+        "{env:EPISEGMIX_CMD}",
+        "--counts",
+        "{counts}",
+        "--regions",
+        "{regions}",
+        "--states",
+        "{n_states}",
+        "--seed",
+        "{seed}",
+        "--out",
+        "{outdir}"
+      ],
+      "output": {
+        "format": "segmentation_bed",
+        "path": "{outdir}/segmentation.bed",
+        "per_sample": false
+      },
+      "verified": false,
+      "how_to_enable": "install EpiSegMix from its repository, write a thin wrapper that accepts the flags above (or edit them to match the installed CLI), then: export EPISEGMIX_CMD=/path/to/wrapper",
+      "notes": "EpiSegMix selects a distribution per mark (Poisson, NB, zero-inflated, ...) and models segment length explicitly. Record which distributions it picked; ChromState's `zinb` emission is the comparable in-process row"
+    },
+    {
+      "key": "dihmm",
+      "display_name": "diHMM (hierarchical nucleosome/domain hidden Markov model)",
+      "stands_for": "two-level annotation: bin-level states nested in domain-level states (Marco et al., Nat Commun 2017)",
+      "enabled": false,
+      "requires_env": [
+        "DIHMM_CMD",
+        "DIHMM_BINARY_DIR"
+      ],
+      "input_format": "chromhmm_binary",
+      "command": [
+        "{env:DIHMM_CMD}",
+        "--input",
+        "{env:DIHMM_BINARY_DIR}",
+        "--nucleosome-states",
+        "{n_states}",
+        "--domain-states",
+        "{env:DIHMM_DOMAIN_STATES}",
+        "--output",
+        "{outdir}"
+      ],
+      "output": {
+        "format": "segmentation_bed",
+        "path": "{outdir}/nucleosome_states.bed",
+        "per_sample": true
+      },
+      "verified": false,
+      "how_to_enable": "install diHMM (MATLAB or its Python port), export DIHMM_CMD, set DIHMM_BINARY_DIR to the folder written by `chromstate export-chromhmm`, and DIHMM_DOMAIN_STATES (e.g. 30)",
+      "notes": "diHMM consumes ChromHMM-style binarised input, so it inherits binarisation; the bin-level BED is what is scored here. The domain-level BED is a separate output and has no counterpart in a flat segmenter"
+    },
+    {
+      "key": "normr",
+      "display_name": "normR (enrichment / regime calling, Bioconductor)",
+      "stands_for": "per-mark enrichment caller (binomial mixture of ChIP vs control), not a joint segmenter; commonly used to define bivalent regions",
+      "enabled": false,
+      "requires_env": [
+        "NORMR_R"
+      ],
+      "requires_binary": "Rscript",
+      "input_format": "count_matrix",
+      "command": [
+        "Rscript",
+        "{env:NORMR_R}",
+        "--counts",
+        "{counts}",
+        "--regions",
+        "{regions}",
+        "--regimes",
+        "2",
+        "--outdir",
+        "{outdir}"
+      ],
+      "output": {
+        "format": "labels",
+        "path": "{outdir}/combinatorial_states.txt",
+        "per_sample": false
+      },
+      "verified": false,
+      "how_to_enable": "install Bioconductor normR, write an R script that runs enrichR/regimeR per mark on the exported counts (needs a control column) and writes one combinatorial-state label per bin, then: export NORMR_R=/path/to/script.R",
+      "notes": "normR needs a control track; the exported count matrix must include the control columns. Its output is per-mark enrichment, so combining marks into `n_states` labels is a step the wrapper must define (the in-process normr_like row uses k-means on enrichment probabilities)"
     }
   ]
 }

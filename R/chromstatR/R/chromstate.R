@@ -316,3 +316,60 @@ print.chromstate_segmentation <- function(x, ...) {
 summary.chromstate_segmentation <- function(object, ...) {
   cs_states(object)
 }
+
+#' Gene-level state composition
+#'
+#' Mean posterior over each gene's promoter (or body) bins, per sample -- the table that
+#' joins to RNA-seq. `gtf` is a GTF/GFF path; `part` is `"promoter"` or `"body"`.
+#'
+#' @param segmentation A `chromstate_segmentation`.
+#' @param gtf Path to a gene annotation in GTF format.
+#' @param part `"promoter"` (default) or `"body"`.
+#' @return A data frame with one row per gene and sample: `gene_id`, `name`, `sample`,
+#'   one column per state, `entropy`, `top_state`, and `signal_<mark>` columns.
+#' @export
+cs_gene_states <- function(segmentation, gtf, part = "promoter") {
+  stopifnot(inherits(segmentation, "chromstate_segmentation"))
+  m <- cs_module()
+  features <- m$FeatureSet$from_gtf(gtf)
+  out <- as_df(m$gene_state_matrix(segmentation$py, features, part = part))
+  attr(out, "chrom") <- as_df(features$table)[, c("gene_id", "chrom")]
+  out
+}
+
+#' Which chromatin states matter for gene expression
+#'
+#' Fits a model of expression from the full per-gene state composition, scores it out of
+#' fold on chromosome-grouped splits, and reports for every state its permutation
+#' importance (loss in Spearman when that state is shuffled), drop-one importance (loss
+#' when it is removed and the remaining shares re-closed), a signed standardised ridge
+#' coefficient, bootstrap intervals, and a rank. The result is an association between
+#' chromatin state and expression; it does not establish direction or causation.
+#'
+#' @param gene_states Output of [cs_gene_states()], restricted to one sample (or pass
+#'   `sample`).
+#' @param expression Named numeric vector of log-scale expression, names are `gene_id`.
+#' @param sample Sample to select from `gene_states` (if it holds several).
+#' @param model `"ridge"` (default; gives signed coefficients) or `"gbm"`.
+#' @param n_permutations,n_boot Permutation repeats and bootstrap resamples.
+#' @param seed Random seed.
+#' @return A list with `table` (one row per state, sorted by rank), `cv_spearman`,
+#'   `cv_r2`, `n_genes`, and `note`.
+#' @export
+cs_state_importance <- function(gene_states, expression, sample = NULL, model = "ridge",
+                                n_permutations = 20, n_boot = 200, seed = 0) {
+  m <- cs_module()
+  if (!is.null(sample)) gene_states <- gene_states[gene_states$sample == sample, ]
+  chrom <- attr(gene_states, "chrom")
+  groups <- NULL
+  if (!is.null(chrom)) {
+    groups <- reticulate::r_to_py(setNames(as.character(chrom$chrom), chrom$gene_id))
+    groups <- reticulate::import("pandas")$Series(groups)
+  }
+  expr <- reticulate::import("pandas")$Series(as.numeric(expression), index = names(expression))
+  res <- m$state_importance(reticulate::r_to_py(gene_states), expr, groups = groups,
+                            model = model, n_permutations = as_py_int(n_permutations),
+                            n_boot = as_py_int(n_boot), seed = as_py_int(seed))
+  list(table = as_df(res$table), cv_spearman = res$cv_spearman, cv_r2 = res$cv_r2,
+       n_genes = res$n_genes, model = res$model, note = res$note)
+}

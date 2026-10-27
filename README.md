@@ -46,8 +46,9 @@ For every genomic bin, ChromState reports:
 
 Between conditions, it measures state flow and transport, sets a replicate-derived
 noise floor, calibrates posteriors and tests regions for change. At the gene level, it
-connects state composition to RNA-seq and traces any result back to its bins, marks and
-read counts.
+connects state composition to RNA-seq, ranks the states by how much each contributes to
+predicting expression and its change (with cross-validation grouped by chromosome and
+bootstrap intervals), and traces any result back to its bins, marks and read counts.
 
 **Performance.**
 - **Simulation with known ground truth.** Retaining signal magnitude substantially
@@ -58,6 +59,14 @@ read counts.
   quantitative states predict gene expression and its changes between cell states more
   accurately than discrete state labels, and they add information beyond raw mark
   signal.
+- **Against the field.** On identical simulated bins, ChromState ties the zero-inflated
+  (EpiSegMix-like) and hierarchical (diHMM-like) count models and leads the Gaussian
+  (Segway-like), negative-multinomial (EpiCSeg-like), binarised (real ChromHMM 1.27)
+  and enrichment-calling (normR-like) approaches on state recovery and calibration
+  ([Tutorial 1 §7.1](docs/tutorials/01_simulation.md), [tool comparison](docs/tool_comparison.md)).
+- **State importance recovers planted effects.** With expression simulated from a known
+  linear effect of three promoter states, `state_importance` ranks exactly those three
+  first, with the right signs and relative magnitudes, and leaves the other four flat.
 - **Poised promoters.** Bivalent and Polycomb-marked promoters identified in naive
   cells anticipate genes that change expression later in differentiation.
 
@@ -179,8 +188,10 @@ pip install -e ".[all]"        # numpy, scipy, pandas, scikit-learn, matplotlib,
 ```
 
 `pysam` is required only for BAM input and `pyBigWig` only for bigWig input. Numba is
-used automatically if installed and accelerates the forward–backward and Viterbi
-recursions.
+used automatically if installed: the forward–backward pass then runs all chromosomes of
+all samples in one fused kernel, in parallel across CPU cores (`NUMBA_NUM_THREADS`), and
+the count likelihoods are gathered in a single pass. Without numba the same results are
+produced by the NumPy reference path, more slowly.
 
 The R interface calls the Python package through `reticulate`:
 
@@ -230,6 +241,15 @@ chromstate fit --manifest cellmarkfiletable.txt --chrom-sizes mm10.chrom.sizes \
                -k 12 --norm median_ratio --blacklist mm10.blacklist.bed -o fit_out
 ```
 
+With a gene annotation and an expression table, `fit` also quantifies every gene and
+ranks the states by their contribution to expression:
+
+```bash
+chromstate fit --manifest cellmarkfiletable.txt --chrom-sizes mm10.chrom.sizes -k 12 \
+               --gtf gencode.vM25.annotation.gtf --expression expression.tsv -o fit_out
+# expression.tsv: gene_id <TAB> CD8_naive <TAB> CD8_exhausted ...  (counts/TPM; log2(x+1) applied)
+```
+
 `chromstate fit` writes the following files:
 
 | File | Content |
@@ -241,6 +261,8 @@ chromstate fit --manifest cellmarkfiletable.txt --chrom-sizes mm10.chrom.sizes \
 | `quantification.tsv.gz` | One row per bin and sample: every per-bin quantity in section 5.5 |
 | `summary.tsv` | Per-sample summary of the quantification table |
 | `figures/*.pdf` | Emissions, transitions, coverage, browser track, confidence, bivalency, attribution, state flow, occupancy change |
+| `gene_states_promoter.tsv.gz` | With `--gtf`: state composition, entropy and mark signal per gene and sample |
+| `state_importance_<sample>.tsv` | With `--expression`: per-state permutation and drop-one importance, signed coefficient, intervals, rank |
 
 Other commands:
 - `chromstate compare` benchmarks the competing models on simulated data.
@@ -395,6 +417,12 @@ per-mark profile. By default it keeps restarting until the best log-likelihood h
 reached at least twice (`adaptive_restarts=True`). It records `restart_hits_at_best`,
 `min_state_separation` and a `collapsed` flag, and warns when a fit appears degenerate.
 
+`emission` defaults to the negative binomial. `zinb` (zero-inflated NB) is available for
+data with excess empty bins, `poisson` and `negative_multinomial` (EpiCSeg's model) for
+comparison, and `gaussian` for peak-score input. `chromstate.benchmark.algorithms.compare_algorithms`
+scores the count models by held-out likelihood on your data; the default is justified in
+[Tutorial 1 §7.2](docs/tutorials/01_simulation.md).
+
 States are named automatically from their emission profiles with the Roadmap
 Epigenomics vocabulary (TssA, TssBiv, ReprPC, Het, Quies, …). The rule that produced
 each name is recorded in `states.tsv`. **Names are a convenience, not a result.** With
@@ -470,6 +498,23 @@ shortlist = cs.rank_traceable_genes(linked, n=50)
 - **Association, not causation.** Results are reported as associations, not as evidence
   that chromatin caused the expression change or of its direction.
 
+**Which states matter.** `state_importance` fits a model of expression from the full
+state composition (ridge or gradient boosting), scores it out of fold on
+chromosome-grouped splits, and reports for each state its permutation importance (loss in
+Spearman when the state is shuffled), its drop-one importance (loss when the state is
+removed and the remaining shares re-closed), a signed standardised coefficient, bootstrap
+intervals and a rank. `state_importance_change` does the same for changes in composition
+against a log2 fold change; `compare_representations` asks whether the quantitative
+composition out-predicts discrete labels on the same genes.
+
+```python
+chrom = features.table.set_index("gene_id")["chrom"]        # fold groups
+imp   = cs.state_importance(genes[genes["sample"] == "TN"], log2_tpm_tn, groups=chrom)
+imp.table[["state", "rank", "perm_importance", "perm_lo", "perm_hi", "coef_std", "direction"]]
+dimp  = cs.state_importance_change(change, rna_lfc, groups=chrom)
+reps  = cs.compare_representations(seg, features, log2_tpm_tn, sample="TN")
+```
+
 ### 5.8 Tracing a single gene
 
 ```python
@@ -495,11 +540,18 @@ Two tutorials work through ChromState in detail.
 
 ## 7. Comparison with external tools
 
-[Tutorial 1](docs/tutorials/01_simulation.md) compares statistical models on identical input. `tools/` runs the **actual
-software** on ChromState's bins:
-- Real ChromHMM is enabled by setting `CHROMHMM_JAR=/path/to/ChromHMM.jar`.
-- EpiCSeg, Segway, epigenome-ssm and other tools are configured through command
-  templates in `tools/tools.json`.
+[docs/tool_comparison.md](docs/tool_comparison.md) compares ChromHMM, Segway, EpiCSeg,
+diHMM, normR, EpiSegMix and ChromState: model, input, resolution, multi-sample handling,
+outputs, differential analysis, expression linkage, scalability and availability, with
+citations, followed by the benchmark on identical bins.
+[Tutorial 1 §7](docs/tutorials/01_simulation.md) runs reimplementations of each tool's
+statistical model (`chromhmm_like`, `segway_like`, `epicseg_like`, `episegmix_like`,
+`dihmm_like`, `normr_like`) on identical input. `tools/` runs the **actual software** on
+ChromState's bins:
+- Real ChromHMM runs when `CHROMHMM_JAR=/path/to/ChromHMM.jar` is set (verified against
+  ChromHMM 1.27; the results are in Tutorial 1 §7.1).
+- EpiCSeg, Segway, epigenome-ssm, EpiSegMix, diHMM and normR are configured through
+  command templates in `tools/tools.json`.
 
 Each tool's output is mapped back onto the bin grid by coordinate and scored with a
 common metric registry:
@@ -514,8 +566,9 @@ python tools/run_tools.py run -o compare_out               # simulated data, all
 python tools/run_tools.py run -o out --counts counts.tsv   # real data, truth-free metrics
 ```
 
-The adapters for EpiCSeg, Segway and epigenome-ssm are **disabled and unverified** until
-each has been run against the real software. See [`tools/README.md`](tools/README.md).
+The adapters for EpiCSeg, Segway, epigenome-ssm, EpiSegMix, diHMM and normR are
+**disabled and unverified** until each has been run against the real software. See
+[`tools/README.md`](tools/README.md).
 
 ---
 
@@ -532,7 +585,8 @@ src/chromstate/      Python package
   features.py        genes, promoters, bin-to-gene mapping, per-gene tracing
   rna.py             expression linkage and association
   viz.py             figures (Nature style, PDF)
-  benchmark/         reimplemented competing models and metrics
+  importance.py      which states matter for expression: permutation, drop-one, coefficients
+  benchmark/         reimplemented competing models, algorithm selection, metrics
 R/chromstatR/        R interface (reticulate)
 tools/               harness for running external segmentation software
 analysis/            real-data analyses (scripts and results)
@@ -543,7 +597,7 @@ tests/               unit and ground-truth tests
 
 ```bash
 pip install -e ".[dev]"
-pytest -q                       # 131 tests, including recovery of simulated ground truth
+pytest -q                       # 174 tests, including recovery of simulated ground truth
 ruff check src tests
 ```
 

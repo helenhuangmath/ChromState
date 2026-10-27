@@ -240,10 +240,189 @@ def run_naive_signal(ds: ChromStateDataset, n_states: int, **_) -> MethodResult:
     )
 
 
+def run_epicseg_like(ds: ChromStateDataset, n_states: int, seed: int = 0, n_restarts: int = 3) -> MethodResult:
+    """EpiCSeg's model: HMM with a negative multinomial emission (one dispersion per state).
+
+    Counts across marks are coupled through a shared total, so the model captures
+    mark-mark correlation that ChromState's independent NB does not, at the price of a
+    single overdispersion for all marks (per state here, EpiCSeg's "independent" mode;
+    its default shares one across all states) and no per-mark attribution.
+    """
+    t0 = time.time()
+    seg = fit(ds, n_states=n_states, emission="negative_multinomial", seed=seed,
+              n_restarts=n_restarts, adaptive_restarts=False)
+    scores = _scores_from_posterior(seg.posterior, seg.model.emissions.mean_matrix(), ds.marks)
+    return MethodResult(
+        name="EpiCSeg-like (negative multinomial)",
+        states=seg.states,
+        posterior=seg.posterior,
+        bivalency_score=scores["bivalency"],
+        activity_score=scores["activity"],
+        n_states=n_states,
+        runtime_s=time.time() - t0,
+        segmentation=seg,
+        notes="counts, one dispersion per state shared by all marks; marks coupled",
+    )
+
+
+def run_episegmix_like(ds: ChromStateDataset, n_states: int, seed: int = 0, n_restarts: int = 3) -> MethodResult:
+    """EpiSegMix's flexible count distributions, approximated by a zero-inflated NB HMM.
+
+    EpiSegMix (Schmitz, Zentgraf & Rahmann, Bioinformatics 2024) chooses a count
+    distribution per mark by likelihood (Poisson, negative binomial, Sichel, beta-NB, ...)
+    and models segment lengths as negative binomial by expanding each state into a
+    left-to-right sub-chain. This baseline keeps a flexible per-mark count distribution
+    (zero-inflated NB) and the ordinary geometric-duration chain, so it isolates what a
+    richer emission buys; the duration model is not reproduced and is noted as such.
+    """
+    t0 = time.time()
+    seg = fit(ds, n_states=n_states, emission="zinb", seed=seed, n_restarts=n_restarts,
+              adaptive_restarts=False)
+    scores = _scores_from_posterior(seg.posterior, seg.model.emissions.mean_matrix(), ds.marks)
+    return MethodResult(
+        name="EpiSegMix-like (ZINB, geometric durations)",
+        states=seg.states,
+        posterior=seg.posterior,
+        bivalency_score=scores["bivalency"],
+        activity_score=scores["activity"],
+        n_states=n_states,
+        runtime_s=time.time() - t0,
+        segmentation=seg,
+        notes="zero-inflated NB per mark; explicit duration model not reproduced",
+    )
+
+
+def run_dihmm_like(ds: ChromStateDataset, n_states: int, seed: int = 0, n_restarts: int = 3,
+                   n_domains: int = 3) -> MethodResult:
+    """diHMM's two-level structure, flattened: bin states nested in domain states.
+
+    The model is an HMM over ``n_domains x n_states`` flat states with emissions tied to
+    the bin state, so each domain state owns its own transition matrix among bin states
+    (the mechanism by which diHMM lets domain context shape bin-level calls). The reported
+    bin-level posterior marginalises over domains; the domain posterior is kept in
+    ``meta``. diHMM's actual implementation (Marco et al. 2017) uses ChromHMM-style
+    binarised input and changes domain state only at the ends of 20-bin blocks; this
+    baseline uses ChromState's count emission and lets the domain state change anywhere,
+    so the comparison isolates the hierarchy itself.
+    """
+    from ..model.emissions import NegativeBinomialEmissions, TiedEmissions
+    from ..model.hmm import HMM
+
+    t0 = time.time()
+    best = None
+    for r in range(n_restarts):
+        rng = np.random.default_rng(seed + r)
+        base = NegativeBinomialEmissions.initialize(ds.X, ds.size_factors, n_states, rng)
+        tied = TiedEmissions(base, n_domains)
+        hmm = HMM(tied.n_states, tied, self_transition_prior=0.9)
+        # Break the symmetry between domains: perturb each domain's block of transitions.
+        A = hmm.transitions.copy()
+        A *= rng.uniform(0.7, 1.3, size=A.shape)
+        hmm.transitions = A / A.sum(axis=1, keepdims=True)
+        res = hmm.fit(ds.X, ds.size_factors, ds.chains)
+        if best is None or res.loglik > best[0]:
+            best = (res.loglik, hmm)
+    assert best is not None
+    hmm = best[1]
+    flat_post = hmm.posterior(ds.X, ds.size_factors, ds.chains)
+    post, domain_post = hmm.emissions.fold_posterior(flat_post)
+    states = np.argmax(post, axis=1).astype(np.int32)
+    scores = _scores_from_posterior(post, hmm.emissions.base.mean_matrix(), ds.marks)
+    return MethodResult(
+        name=f"diHMM-like (hierarchical, {n_domains} domain states)",
+        states=states,
+        posterior=post,
+        bivalency_score=scores["bivalency"],
+        activity_score=scores["activity"],
+        n_states=n_states,
+        runtime_s=time.time() - t0,
+        notes=f"flattened {n_domains}x{n_states}-state HMM with tied NB emissions",
+        meta={"domain_posterior": domain_post, "loglik": best[0]},
+    )
+
+
+def run_normr_like(ds: ChromStateDataset, n_states: int, seed: int = 0, **_) -> MethodResult:
+    """normR's regime calling, per mark, with no spatial model.
+
+    normR (Helmuth et al.) fits a binomial mixture to ChIP versus control counts and
+    calls each bin background or enriched (``enrichR``), or one of several enrichment
+    regimes (``regimeR``). It is an enrichment caller, not a segmenter: it has no
+    transition model and produces per-mark calls rather than joint states. This baseline
+    fits a two-component NB mixture per mark (background / enriched) by EM, then forms
+    combinatorial states from the per-mark enrichment probabilities with k-means to reach
+    ``n_states``. It is included because joint enrichment of H3K4me3 and H3K27me3 from a
+    caller like normR is a natural way to define bivalent regions, which is exactly what
+    ChromState's bivalency score quantifies.
+    """
+    from sklearn.cluster import KMeans
+
+    t0 = time.time()
+    rng = np.random.default_rng(seed)
+    Z = ds.X / np.maximum(ds.size_factors, EPS)
+    P = np.empty_like(Z)
+    for m in range(ds.n_marks):
+        P[:, m] = _two_component_nb_posterior(ds.X[:, m], ds.size_factors[:, m], rng)
+    # Combinatorial enrichment patterns, reduced to n_states by clustering.
+    km = KMeans(n_clusters=n_states, n_init=5, random_state=seed).fit(P)
+    labels = km.labels_.astype(np.int32)
+    onehot = np.zeros((len(labels), n_states))
+    onehot[np.arange(len(labels)), labels] = 1.0
+    # State profile = mean normalised signal in the cluster, for the shared score formulas.
+    means = np.stack([Z[labels == k].mean(axis=0) if (labels == k).any() else Z.mean(axis=0)
+                      for k in range(n_states)])
+    canon = [canonical_mark(m) for m in ds.marks]
+    if "K4me3" in canon and "K27me3" in canon:
+        # normR-style bivalency: joint enrichment probability of the two marks.
+        biv = P[:, canon.index("K4me3")] * P[:, canon.index("K27me3")]
+    else:
+        biv = np.zeros(ds.n_rows)
+    return MethodResult(
+        name="normR-like (per-mark enrichment, no spatial model)",
+        states=labels,
+        posterior=onehot,
+        bivalency_score=biv,
+        activity_score=(P * np.log1p(means).mean(axis=0)[None, :]).sum(axis=1),
+        n_states=n_states,
+        runtime_s=time.time() - t0,
+        notes="two-regime NB mixture per mark; combinatorial patterns clustered to K; no chain",
+        meta={"enrichment_probability": P},
+    )
+
+
+def _two_component_nb_posterior(x: np.ndarray, offset: np.ndarray, rng: np.random.Generator,
+                                n_iter: int = 50) -> np.ndarray:
+    """P(enriched) per bin from a two-component NB mixture fitted by EM (shared dispersion)."""
+    from scipy.special import gammaln
+
+    scaled = x / np.maximum(offset, EPS)
+    hi = scaled > np.quantile(scaled, 0.9)
+    mu = np.array([max(scaled[~hi].mean(), 1e-3), max(scaled[hi].mean(), 1e-2)])
+    pi = np.array([0.9, 0.1])
+    var = scaled.var()
+    r = float(np.clip(mu.mean() ** 2 / max(var - mu.mean(), 1e-6), 0.5, 1e3))
+    resp = None
+    for _ in range(n_iter):
+        mean = np.maximum(offset[:, None] * mu[None, :], 1e-6)
+        ll = (gammaln(x[:, None] + r) - gammaln(r) - gammaln(x[:, None] + 1.0)
+              + r * np.log(r / (r + mean)) + x[:, None] * np.log(mean / (r + mean)))
+        ll += np.log(np.maximum(pi, 1e-12))[None, :]
+        ll -= ll.max(axis=1, keepdims=True)
+        resp = np.exp(ll)
+        resp /= resp.sum(axis=1, keepdims=True)
+        pi = np.maximum(resp.mean(axis=0), 1e-6)
+        mu = np.maximum((resp * x[:, None]).sum(axis=0) / np.maximum((resp * offset[:, None]).sum(axis=0), 1e-12), 1e-6)
+    assert resp is not None
+    return resp[:, int(np.argmax(mu))]
+
+
 METHODS = {
     "chromstate": run_chromstate,
     "chromhmm_like": run_chromhmm_like,
     "segway_like": run_segway_like,
+    "epicseg_like": run_epicseg_like,
+    "episegmix_like": run_episegmix_like,
+    "dihmm_like": run_dihmm_like,
+    "normr_like": run_normr_like,
     "gmm": run_gmm,
     "kmeans": run_kmeans,
     "naive": run_naive_signal,

@@ -104,6 +104,135 @@ _forward = _forward_numba if _HAS_NUMBA else _forward_numpy
 _backward = _backward_numba if _HAS_NUMBA else _backward_numpy
 
 
+if _HAS_NUMBA:  # pragma: no cover - compiled
+    from numba import prange
+
+    @njit(cache=True, parallel=True)
+    def _fused_e_step_numba(B, A, pi, starts, stops, gamma, xi, init, ll):
+        """Forward-backward for every chain at once, chains in parallel.
+
+        ``B`` is the scaled emission likelihood ``exp(log_B - rowmax)`` for all rows;
+        ``starts``/``stops`` delimit the chains. Each chain writes its own slice of
+        ``gamma`` and its own row of ``xi`` (K x K), ``init`` (K) and ``ll`` (the
+        log-likelihood *without* the row maxima, which the caller adds back). Chains are
+        independent, so there is no shared state inside the parallel loop except
+        disjoint output slices.
+        """
+        K = A.shape[1]
+        for c in prange(starts.shape[0]):
+            s = starts[c]
+            e = stops[c]
+            T = e - s
+            if T <= 0:
+                continue
+            alpha = np.empty((T, K))
+            scale = np.empty(T)
+            # forward
+            tot = 0.0
+            for k in range(K):
+                alpha[0, k] = pi[k] * B[s, k]
+                tot += alpha[0, k]
+            if tot <= 0.0:
+                tot = 1e-300
+            scale[0] = tot
+            for k in range(K):
+                alpha[0, k] /= tot
+            for t in range(1, T):
+                tot = 0.0
+                for j in range(K):
+                    acc = 0.0
+                    for i in range(K):
+                        acc += alpha[t - 1, i] * A[i, j]
+                    v = acc * B[s + t, j]
+                    alpha[t, j] = v
+                    tot += v
+                if tot <= 0.0:
+                    tot = 1e-300
+                scale[t] = tot
+                for j in range(K):
+                    alpha[t, j] /= tot
+            # backward, gamma and xi in one sweep
+            beta = np.empty(K)
+            beta_next = np.empty(K)
+            for k in range(K):
+                beta[k] = 1.0
+                xi[c, k, :] = 0.0
+            # last position
+            gsum = 0.0
+            for k in range(K):
+                gamma[e - 1, k] = alpha[T - 1, k]
+                gsum += gamma[e - 1, k]
+            if gsum <= 0.0:
+                gsum = 1e-300
+            for k in range(K):
+                gamma[e - 1, k] /= gsum
+            for t in range(T - 2, -1, -1):
+                for k in range(K):
+                    beta_next[k] = beta[k]
+                inv_c = 1.0 / scale[t + 1]
+                gsum = 0.0
+                for i in range(K):
+                    acc = 0.0
+                    for j in range(K):
+                        w = B[s + t + 1, j] * beta_next[j] * inv_c
+                        acc += A[i, j] * w
+                        xi[c, i, j] += alpha[t, i] * A[i, j] * w
+                    beta[i] = acc
+                    g = alpha[t, i] * acc
+                    gamma[s + t, i] = g
+                    gsum += g
+                if gsum <= 0.0:
+                    gsum = 1e-300
+                for i in range(K):
+                    gamma[s + t, i] /= gsum
+            for k in range(K):
+                init[c, k] = gamma[s, k]
+            acc_ll = 0.0
+            for t in range(T):
+                acc_ll += np.log(scale[t])
+            ll[c] = acc_ll
+
+
+def e_step_all_chains(
+    log_B: np.ndarray, A: np.ndarray, pi: np.ndarray, chains: Sequence[slice]
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, float]:
+    """Posteriors, expected transitions and initial-state counts over all chains.
+
+    With numba, chains run in parallel in a single fused forward-backward pass; without
+    it, the per-chain :func:`forward_backward` is used. Rows outside every chain get zero
+    posterior weight (see :meth:`HMM._e_step`).
+    """
+    T_all, K = log_B.shape
+    gamma = np.zeros((T_all, K))
+    if _HAS_NUMBA and len(chains) > 0:
+        starts = np.array([sl.start for sl in chains], dtype=np.int64)
+        stops = np.array([sl.stop for sl in chains], dtype=np.int64)
+        row_max = log_B.max(axis=1)
+        B = np.exp(log_B - row_max[:, None])
+        xi = np.zeros((len(chains), K, K))
+        init = np.zeros((len(chains), K))
+        ll = np.zeros(len(chains))
+        _fused_e_step_numba(
+            np.ascontiguousarray(B), np.ascontiguousarray(A, dtype=np.float64),
+            np.ascontiguousarray(pi, dtype=np.float64), starts, stops, gamma, xi, init, ll,
+        )
+        covered = np.zeros(T_all, dtype=bool)
+        for sl in chains:
+            covered[sl] = True
+        loglik = float(ll.sum() + row_max[covered].sum())
+        return gamma, xi.sum(axis=0), init.sum(axis=0), loglik
+    xi_sum = np.zeros((K, K))
+    init_sum = np.zeros(K)
+    loglik = 0.0
+    for sl in chains:
+        g, xi, ll = forward_backward(log_B[sl], A, pi)
+        gamma[sl] = g
+        xi_sum += xi
+        init_sum += g[0]
+        loglik += ll
+    return gamma, xi_sum, init_sum, loglik
+
+
 def forward_backward(
     log_B: np.ndarray, A: np.ndarray, pi: np.ndarray
 ) -> Tuple[np.ndarray, np.ndarray, float]:
@@ -245,22 +374,10 @@ class HMM:
         self, X: np.ndarray, offsets: np.ndarray, chains: Sequence[slice]
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, float]:
         log_B = self.emissions.log_prob(X, offsets)
-        # Zeros, not np.empty: `chains` need not cover every row of X. Held-out model
-        # selection fits on a subset of chromosomes, and with np.empty the uncovered
-        # rows would carry uninitialised memory into the M-step as if it were
-        # responsibility -- silently corrupting every emission estimate. Zero weight is
-        # both safe and correct: a row outside the fitted chains contributes nothing.
-        gamma = np.zeros((X.shape[0], self.n_states))
-        xi_sum = np.zeros((self.n_states, self.n_states))
-        init_sum = np.zeros(self.n_states)
-        loglik = 0.0
-        for sl in chains:
-            g, xi, ll = forward_backward(log_B[sl], self.transitions, self.init_probs)
-            gamma[sl] = g
-            xi_sum += xi
-            init_sum += g[0]
-            loglik += ll
-        return gamma, xi_sum, init_sum, loglik
+        # Rows outside `chains` get zero posterior weight: held-out model selection fits
+        # on a subset of chromosomes, and any uninitialised memory there would flow into
+        # the M-step as if it were responsibility. e_step_all_chains zero-fills.
+        return e_step_all_chains(log_B, self.transitions, self.init_probs, chains)
 
     # -- fitting --------------------------------------------------------------
 

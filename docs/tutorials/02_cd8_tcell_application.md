@@ -255,6 +255,29 @@ A model of the full state composition is fitted, and each state is then permuted
 held-out data. The drop in R² is the state's **unique** contribution, the information
 no other state can substitute for.
 
+This analysis is now a package function. `chromstate.state_importance` takes the
+per-gene composition from `gene_state_matrix` and a per-gene expression vector, and
+returns for every state the permutation importance, the drop-one importance with the
+remaining shares re-closed, a signed standardised coefficient (ridge) with bootstrap
+intervals, and a rank; `state_importance_change` does the same for `delta_<state>`
+columns against a log2 fold change, and `compare_representations` scores the quantitative
+composition against hard state fractions, the TSS state and raw signal on the same genes.
+From the command line, `chromstate fit --gtf genes.gtf --expression expr.tsv` writes a
+`state_importance_<sample>.tsv` per sample.
+
+```python
+genes = cs.gene_state_matrix(seg, features, part="promoter")
+chrom = features.table.set_index("gene_id")["chrom"]
+level = cs.state_importance(genes[genes["sample"] == "TN"], log2_tpm["TN"], groups=chrom)
+change = cs.state_importance_change(cs.gene_state_change(genes, ["TN"], ["TEX"]),
+                                    deseq_tex_vs_tn, groups=chrom)
+level.table[["state", "rank", "perm_importance", "perm_lo", "perm_hi", "coef_std", "direction"]]
+```
+
+Cross-validation is grouped by chromosome, and the result's `note` states the model,
+the number of genes joined, and that the quantities are associations. The table below was
+produced by the analysis script; its numbers are permutation losses in R².
+
 | State | Level (TN) | Change, TMEM vs TN | Change, TEX vs TN |
 |---|---|---|---|
 | Active TSS | **0.347** | **0.416** | **0.415** |
