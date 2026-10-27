@@ -390,19 +390,22 @@ seg <- cs_fit(ds, n_states = 12)
 cs_emissions(seg); cs_states(seg)
 ```
 
-For genome-scale data, estimate the parameters on part of the genome and decode every
-bin with them:
+Fitting is multithreaded across chromosomes (`n_jobs`, or `CHROMSTATE_THREADS`;
+results do not depend on the thread count). On CD8 T-cell chr19 (921,474 bins, 15
+states) a fit takes 64 s, against 173 s with the previous implementation, at the same
+log-likelihood (−5,720,329 vs −5,720,122).
+
+For exploratory fits on very large data, the parameters can be estimated on part of the
+genome and every bin decoded with them:
 
 ```python
-seg = cs.fit(ds, n_states=12, fit_fraction=0.2)   # EM on 20% of the genome, decode all
+seg = cs.fit(ds, n_states=12, fit_fraction=0.25)  # EM on 25% of the genome, decode all
 ```
 
-`fit_fraction` draws whole genomic blocks (`block_bins`, 25,000 bins = 5 Mb by default),
-the same blocks in every sample, so conditions are fitted on identical loci. On 800,000
-simulated bins (8 states, 5 restarts) a full fit takes 30 s and `fit_fraction=0.25`
-takes 9 s at the same accuracy (adjusted Rand index 0.92). Forward–backward and Viterbi
-run on a thread pool across chromosomes (`n_jobs`, or `CHROMSTATE_THREADS`); results do
-not depend on the thread count.
+`fit_fraction` draws whole genomic blocks (`block_bins`, 2,500 bins = 500 kb by default),
+the same blocks in every sample. It costs accuracy on real data: on chr19 it halved the
+time but agreed with a full fit at an adjusted Rand index of only 0.74. Rare states have
+to be present in the sample. Refit on all bins for final results.
 
 Baum–Welch is not convex. ChromState uses multiple restarts seeded by k-means on the
 per-mark profile. By default it keeps restarting until the best log-likelihood has been

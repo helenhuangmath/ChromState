@@ -147,7 +147,7 @@ def fit(
     verbose: bool = False,
     self_transition_prior: float = 0.9,
     fit_fraction: Optional[float] = None,
-    block_bins: int = 25_000,
+    block_bins: int = 2_500,
     n_jobs: Optional[int] = None,
 ) -> Segmentation:
     """Fit a ChromState model to a dataset.
@@ -177,10 +177,17 @@ def fit(
         compute the posterior and Viterbi path on every bin with those parameters. The
         genome is cut into blocks of ``block_bins`` bins and whole blocks are drawn, the
         same blocks in every sample, so each training piece is a long contiguous chain
-        and conditions are compared on identical loci. The model has only K x M means,
-        M dispersions and K x K transitions, which a few million bins estimate as well
-        as the whole genome; EM time falls in proportion to the fraction.
-        ``None`` (the default) fits on everything.
+        and conditions are compared on identical loci. EM time falls in proportion to
+        the fraction. ``None`` (the default) fits on everything.
+
+        This trades accuracy for speed, and the trade is not free on real data: rare
+        states (active promoters, heterochromatin) must be represented in the sample.
+        On CD8 T-cell chr19 (921k bins, K=15), ``fit_fraction=0.25`` with 5 Mb blocks
+        lost 3% of the full-data log-likelihood; with the default 500 kb blocks it lost
+        0.08%, but the segmentation agreed with a full fit at an adjusted Rand index of
+        only 0.74. Use it for exploratory genome-scale fits (many millions of bins), and
+        refit on everything for final results. A warning is raised when the training
+        subset is under ``1_000_000`` rows.
     n_jobs
         Threads for the per-chain forward-backward and Viterbi recursions. Defaults to
         ``CHROMSTATE_THREADS`` or up to 8 cores; results do not depend on it.
@@ -197,6 +204,14 @@ def fit(
     if fit_fraction is not None and fit_fraction < 1.0:
         train = training_blocks(ds, fit_fraction, block_bins, np.random.default_rng(seed))
         X, offsets, chains = take_chains(X, offsets, train)
+        if X.shape[0] < 1_000_000:
+            warnings.warn(
+                f"fit_fraction={fit_fraction} leaves {X.shape[0]:,} training rows. Rare "
+                "states may be missed at this size; fit on all bins unless the dataset is "
+                "genome-scale.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
     best: Optional[Tuple[float, HMM]] = None
     logliks: List[float] = []
 
