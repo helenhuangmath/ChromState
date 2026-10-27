@@ -1,0 +1,20 @@
+--- src/array.h
++++ src/array.h
+@@ -275,7 +275,7 @@
+     }
+     
+     F77_CALL(dgemm)(TA, TB, &M, &N, &K, &alpha, A.ptr, &A.nrow, 
+-                B.ptr, &B.nrow, &beta, C.ptr, &C.nrow);
++                B.ptr, &B.nrow, &beta, C.ptr, &C.nrow FCONE FCONE);
+ }
+ 
+ //y := alpha*op(A)*x + beta*y
+@@ -292,7 +292,7 @@
+     }
+     
+     F77_CALL(dgemv)(T, &A.nrow, &A.ncol, &alpha, A.ptr, &A.nrow, X.ptr, &one, 
+-            &beta, Y.ptr, &one);
++            &beta, Y.ptr, &one FCONE);
+ }
+ 
+ 

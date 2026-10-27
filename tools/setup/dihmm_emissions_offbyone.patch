@@ -1,0 +1,11 @@
+--- Emissions_Dec.h
++++ Emissions_Dec.h
+@@ -44,7 +44,7 @@
+
+       vec observation = int_to_vec(i, n_histone_marks);
+
+-      for (int j = 0; j <= n_bin_states; j++) {
++      for (int j = 0; j < n_bin_states; j++) {
+         emissions_memo[i][j] = emission_probability_direct(j, observation);
+       }
+     }
