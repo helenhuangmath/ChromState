@@ -61,7 +61,7 @@ metric compares against), `--per-bin` to dump every tool's call per bin for IGV.
 | **real ChromHMM** | `java -jar ChromHMM.jar LearnModel` on the same bins | evidence about the tool; enable with `CHROMHMM_JAR` |
 | **configured** | anything in `tools.json`: command template + output parser | evidence about the tool, once you have checked the command |
 
-The real-ChromHMM adapter is **verified**: it has been run against ChromHMM 1.27
+The real-ChromHMM adapter is **verified**: it has been run against ChromHMM 1.28
 (`jernst98/ChromHMM`) on simulated bins, which is how the `-noenrich` flag was found to be
 necessary (`LearnModel` writes the segmentation and posteriors, then aborts in enrichment
 when the bins do not match the named assembly). It also reads `emissions_K.txt` to give

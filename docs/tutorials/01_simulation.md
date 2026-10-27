@@ -227,7 +227,7 @@ python tools/run_tools.py run -o out --simulate 10000 --n-chroms 4 --blur 0.35 -
 | EpiSegMix-like (ZINB HMM) | a flexible per-mark count emission, geometric durations | **0.803 ± 0.018** | **0.904 ± 0.005** | 0.779 ± 0.061 | **0.882 ± 0.006** | **0.060 ± 0.003** | 0.8 |
 | diHMM-like (hierarchical, flattened) | diHMM's two-level structure | 0.798 ± 0.016 | 0.902 ± 0.004 | **0.818 ± 0.054** | 0.879 ± 0.006 | 0.064 ± 0.003 | 2.3 |
 | Segway-like (Gaussian HMM) | Segway | 0.786 ± 0.020 | 0.895 ± 0.006 | 0.743 ± 0.046 | 0.869 ± 0.007 | 0.074 ± 0.005 | 2.2 |
-| **ChromHMM 1.27 (real `LearnModel`)** | ChromHMM | 0.704 ± 0.058 | 0.804 ± 0.070 | 0.414 ± 0.278 | 0.832 ± 0.022 | 0.093 ± 0.068 | 7.9 |
+| **ChromHMM 1.28 (real `LearnModel`)** | ChromHMM | 0.704 ± 0.058 | 0.804 ± 0.070 | 0.414 ± 0.278 | 0.832 ± 0.022 | 0.093 ± 0.068 | 7.9 |
 | EpiCSeg-like (negative multinomial HMM) | EpiCSeg | 0.690 ± 0.012 | 0.848 ± 0.004 | 0.796 ± 0.022 | 0.832 ± 0.017 | 0.123 ± 0.002 | 5.6 |
 | ChromHMM-like (Bernoulli HMM) | ChromHMM's model, reimplemented | 0.673 ± 0.063 | 0.794 ± 0.067 | 0.407 ± 0.265 | 0.810 ± 0.041 | 0.089 ± 0.069 | 1.5 |
 | k-means | hard assignment | 0.655 ± 0.011 | 0.829 ± 0.003 | 0.574 ± 0.024 | 0.838 ± 0.006 | 0.171 ± 0.003 | 1.5 |

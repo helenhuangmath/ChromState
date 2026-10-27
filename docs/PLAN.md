@@ -303,7 +303,7 @@ with one metric registry — truth-based metrics on simulated data, truth-free o
 (segment shape, coverage, posterior decisiveness, pairwise agreement, runtime, memory) on
 real data. Tools that are absent or crash stay in the table with a reason.
 
-**Real ChromHMM has been run through the harness** (ChromHMM 1.27 from
+**Real ChromHMM has been run through the harness** (ChromHMM 1.28 from
 `jernst98/ChromHMM`, October 2026): the adapter needed `-noenrich`, because `LearnModel`
 otherwise aborts in its post-hoc enrichment step on chromosomes that do not match the
 named assembly, *after* writing the segmentation. Results over three seeds are in

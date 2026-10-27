@@ -37,7 +37,7 @@ class ChromHMMAdapter(ToolAdapter):
     key = "chromhmm"
     display_name = "ChromHMM (real, LearnModel)"
     kind = "external"
-    verified = True  # run against ChromHMM 1.27 (jernst98/ChromHMM) on simulated bins, Oct 2026
+    verified = True  # run against ChromHMM 1.28 (jernst98/ChromHMM) on simulated bins, Oct 2026
     stands_for = "the actual published tool"
 
     def availability(self) -> Availability:

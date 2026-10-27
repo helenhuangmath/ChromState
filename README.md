@@ -61,7 +61,7 @@ bootstrap intervals), and traces any result back to its bins, marks and read cou
   signal.
 - **Against the field.** On identical simulated bins, ChromState ties the zero-inflated
   (EpiSegMix-like) and hierarchical (diHMM-like) count models and leads the Gaussian
-  (Segway-like), negative-multinomial (EpiCSeg-like), binarised (real ChromHMM 1.27)
+  (Segway-like), negative-multinomial (EpiCSeg-like), binarised (real ChromHMM 1.28)
   and enrichment-calling (normR-like) approaches on state recovery and calibration
   ([Tutorial 1 §7.1](docs/tutorials/01_simulation.md), [tool comparison](docs/tool_comparison.md)).
 - **State importance recovers planted effects.** With expression simulated from a known
@@ -549,7 +549,7 @@ statistical model (`chromhmm_like`, `segway_like`, `epicseg_like`, `episegmix_li
 `dihmm_like`, `normr_like`) on identical input. `tools/` runs the **actual software** on
 ChromState's bins:
 - Real ChromHMM runs when `CHROMHMM_JAR=/path/to/ChromHMM.jar` is set (verified against
-  ChromHMM 1.27; the results are in Tutorial 1 §7.1).
+  ChromHMM 1.28; the results are in Tutorial 1 §7.1).
 - EpiCSeg, Segway, epigenome-ssm, EpiSegMix, diHMM and normR are configured through
   command templates in `tools/tools.json`.
 
