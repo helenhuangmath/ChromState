@@ -256,6 +256,70 @@ causation. State-level corrections use the reliability of each state's least rel
 mark as a proxy. The reliabilities of H3K27me3 and H3K9me3 were estimated in TEX and
 TMEM respectively, where replicates were available.
 
+## 6b. Quantifying each state per gene: occupancy, intensity and dose (step 16)
+
+Section 2 left one gap. In TMEM vs TN, ChromState's state composition (ρ 0.511) lost to
+raw mark signal (0.529). The composition says *how much of a promoter* is in each state,
+but not *how strongly* it is marked there: two Active TSS promoters with 5 and 50
+H3K4me3 reads both have occupancy near 1. Step 16 adds that missing number to every
+state, using `chromstate.regulation.gene_quantification`:
+
+| Quantity | Definition | Answers |
+|---|---|---|
+| `occ_<state>` | mean posterior over the region | how much of the region is in the state |
+| `int_<state>` | posterior-weighted log fold of observed signal over the state's own expected signal, on the marks that define the state | how strongly the state is expressed where it is present (0 = typical) |
+| `dose_<state>` | occupancy weighted by that fold | amount of state, counting strong instances for more |
+
+Same genes, same folds (grouped by chromosome), same gradient-boosting model as step 5.
+Values are held-out Spearman ρ with 95% bootstrap CIs over genes:
+
+| Task (genes) | Quantitative (occ + int + dose + entropy + bivalency) | Step 5 (occ + entropy + bivalency) | Raw signal | ChromHMM composition | ChromHMM state at TSS |
+|---|---|---|---|---|---|
+| Level, TN (21,533) | **0.824** [0.819, 0.828] | 0.821 | 0.803 | 0.793 | 0.632 |
+| Change, TMEM vs TN (13,756) | **0.533** [0.517, 0.547] | 0.508 | 0.530 | 0.411 | 0.164 |
+| Change, TEX vs TN (13,756) | **0.575** [0.561, 0.589] | 0.555 | 0.542 | 0.444 | 0.181 |
+| Change, TEX vs TMEM (13,756) | **0.454** [0.436, 0.469] | 0.431 | 0.408 | 0.291 | 0.084 |
+
+Paired bootstrap differences (quantitative minus the other family):
+- **Versus step 5:** +0.020 to +0.025 on every change task (all CIs exclude 0). The
+  gain comes from intensity and dose; entropy and bivalency were already in step 5.
+- **Versus raw signal:** tied on TMEM vs TN (+0.002 [−0.009, 0.014]); ahead on
+  TEX vs TN (+0.033 [0.022, 0.044]) and TEX vs TMEM (+0.045 [0.031, 0.059]). The
+  gap of section 2 is closed without adding raw marks back.
+- **Versus ChromHMM:** +0.12 to +0.16 over published composition, +0.37 to +0.39 over
+  the state at the TSS.
+- **Adding raw signal on top** still helps a little (+0.009 to +0.020), so some
+  information in the marks is not captured by any per-state number.
+
+**Which states matter** (`chromstate.regulation.state_importance`; unique R² is the
+held-out R² lost when all of a state's columns are permuted in the full model, 95% CI
+over genes; direction is the sign of the association of promoter occupancy, or its
+change, with expression):
+
+| Rank | Level, TN | Change, TMEM vs TN | Change, TEX vs TN | Change, TEX vs TMEM |
+|---|---|---|---|---|
+| 1 | Active TSS 0.233 (+) | Active TSS 0.308 (+) | Active TSS 0.298 (+) | Active TSS 0.193 (+) |
+| 2 | "Quies_4" 0.093 | Flanking TSS 0.040 (+) | Bivalent TSS 0.055 (−) | Bivalent TSS 0.076 (−) |
+| 3 | Flanking TSS 0.039 (+) | Bivalent TSS 0.034 (−) | Polycomb (2) 0.043 (−) | Flanking TSS 0.073 (+) |
+| 4 | "Quies_5" 0.039 | Weak Polycomb 0.020 (−) | Flanking TSS 0.043 (+) | Polycomb (2) 0.021 (−) |
+| 5 | Bivalent TSS 0.012 | Polycomb (2) 0.020 (−) | Weak Polycomb 0.025 (−) | Weak Polycomb 0.019 (−) |
+
+- **Active TSS dominates every task.** It alone accounts for 0.19–0.31 of held-out
+  variance that no other state can stand in for.
+- **Change depends on poised and Polycomb promoters.** Bivalent TSS, Polycomb and weak
+  Polycomb are the next states for every change contrast, all with negative direction:
+  genes whose promoters gain these states go down. The bivalent state matters more in
+  the exhaustion contrasts (0.055, 0.076) than in memory (0.034).
+- **A naming caveat.** "Quies_4" is not quiescent: its emission profile is weakly active
+  (H3K4me3 4.1, H3K27ac 1.8 reads per bin, little repressive mark). It mostly covers
+  transcribed gene bodies (gene-body occupancy versus TN expression, ρ = 0.55). The
+  naming rule calls it quiescent because no mark reaches 1.5× the genome mean. "Quies_5"
+  carries H3K4me3 and H3K27me3 at similar low levels. Read state names together with the
+  emission table.
+
+As in section 5, these are associations measured on held-out chromosomes, not causal
+effects. The figure is `out/figures/fig_state_quantification.pdf`.
+
 ---
 
 ## 7. Summary

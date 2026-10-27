@@ -390,6 +390,20 @@ seg <- cs_fit(ds, n_states = 12)
 cs_emissions(seg); cs_states(seg)
 ```
 
+For genome-scale data, estimate the parameters on part of the genome and decode every
+bin with them:
+
+```python
+seg = cs.fit(ds, n_states=12, fit_fraction=0.2)   # EM on 20% of the genome, decode all
+```
+
+`fit_fraction` draws whole genomic blocks (`block_bins`, 25,000 bins = 5 Mb by default),
+the same blocks in every sample, so conditions are fitted on identical loci. On 800,000
+simulated bins (8 states, 5 restarts) a full fit takes 30 s and `fit_fraction=0.25`
+takes 9 s at the same accuracy (adjusted Rand index 0.92). Forward–backward and Viterbi
+run on a thread pool across chromosomes (`n_jobs`, or `CHROMSTATE_THREADS`); results do
+not depend on the thread count.
+
 Baum–Welch is not convex. ChromState uses multiple restarts seeded by k-means on the
 per-mark profile. By default it keeps restarting until the best log-likelihood has been
 reached at least twice (`adaptive_restarts=True`). It records `restart_hits_at_best`,
@@ -470,7 +484,49 @@ shortlist = cs.rank_traceable_genes(linked, n=50)
 - **Association, not causation.** Results are reported as associations, not as evidence
   that chromatin caused the expression change or of its direction.
 
-### 5.8 Tracing a single gene
+### 5.8 Which states regulate expression?
+
+`chromstate.regulation` turns every state into numbers per gene and ranks states by how
+much held-out expression variance they explain.
+
+```python
+gq = cs.gene_quantification(seg, features)          # gene x sample, promoter (P_) and body (B_)
+
+# expression level: genes x samples, log scale
+imp, rep = cs.rank_states_for_expression(gq, expression=log_expr, samples=["TN"])
+# expression change: log2 fold change of group b over group a
+imp, rep = cs.rank_states_for_expression(gq, lfc=rna_lfc, contrast=(tn_reps, tex_reps))
+
+imp.table      # per state: marginal_rho, unique_r2 (95% CI), direction
+rep.scores     # held-out accuracy of each representation; rep.contrasts: paired differences
+```
+
+For every state and gene part there are three quantities:
+
+| Column | Meaning |
+|---|---|
+| `occ_<state>` | Occupancy: mean posterior over the region (how much of it is in the state) |
+| `int_<state>` | Intensity: posterior-weighted log fold of the signal over the state's own expected signal, on the marks that define the state (how strongly; 0 = typical) |
+| `dose_<state>` | Occupancy weighted by that fold |
+
+Entropy, bivalency and mean raw signal per mark (`sig_<mark>`) are included as well.
+
+- **Two kinds of importance.** `marginal_rho` scores a model that sees one state only.
+  `unique_r2` is the held-out R² lost when that state is permuted inside the full
+  model, i.e. what no other state can replace. Redundant states score high on the first
+  and low on the second.
+- **Held-out chromosomes.** Every score uses folds grouped by chromosome. Representations
+  (`top_state`, `occupancy`, `quantitative`, `signal`, …) are compared on the same genes
+  with paired bootstrap differences.
+- **Models.** Gradient boosting (`model="hgb"`, the default, no extra dependency),
+  `"xgboost"`, `"ridge"` as a linear reference, or any `seed -> estimator` callable.
+
+In the CD8 T-cell data, adding intensity and dose raises held-out prediction of
+expression change by 0.020–0.025 Spearman ρ over occupancy-based features, and beats raw
+mark signal on two of three contrasts (tie on the third)
+([results](analysis/scireports2025/RESULTS.md)).
+
+### 5.9 Tracing a single gene
 
 ```python
 trace = cs.trace_gene(seg, features, "ENSMUSG00000025902")
@@ -531,6 +587,7 @@ src/chromstate/      Python package
   calibrate.py       temperature scaling
   features.py        genes, promoters, bin-to-gene mapping, per-gene tracing
   rna.py             expression linkage and association
+  regulation.py      per-state gene quantification; state importance for expression
   viz.py             figures (Nature style, PDF)
   benchmark/         reimplemented competing models and metrics
 R/chromstatR/        R interface (reticulate)
@@ -543,7 +600,7 @@ tests/               unit and ground-truth tests
 
 ```bash
 pip install -e ".[dev]"
-pytest -q                       # 131 tests, including recovery of simulated ground truth
+pytest -q                       # 161 tests, including recovery of simulated ground truth
 ruff check src tests
 ```
 

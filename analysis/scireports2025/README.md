@@ -31,6 +31,8 @@ python s12_marker_genes.py   # Fig. 6 (marker genes)
 python s13_tracks.py Pdcd1 Tigit Tox Tcf7   # Fig. 7, one PDF per gene (any genes)
 python s14_enhancers.py      # ATAC elements, ABC enhancer-gene links       (~3 min)
 python s15_chromatin_programs.py  # Figs. 8-9: poised genes, chromatin ahead of RNA, gene clusters (~2 min)
+python s16_state_quantification.py  # per-state occupancy/intensity/dose; state importance (~15 min)
+python s17_figure_state_quant.py    # figure for step 16 -> out/figures/fig_state_quantification.pdf
 ```
 
 Outputs go to `out/` (git-ignored).
