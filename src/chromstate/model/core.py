@@ -146,6 +146,9 @@ def fit(
     seed: int = 0,
     verbose: bool = False,
     self_transition_prior: float = 0.9,
+    fit_fraction: Optional[float] = None,
+    block_bins: int = 25_000,
+    n_jobs: Optional[int] = None,
 ) -> Segmentation:
     """Fit a ChromState model to a dataset.
 
@@ -169,6 +172,18 @@ def fit(
         real evidence it is not a one-off local basin. ``meta['restart_hits_at_best']``
         records how many got there; a value of 1 at ``max_restarts`` means the fit should
         be treated with suspicion.
+    fit_fraction, block_bins
+        Estimate the parameters by EM on a random ``fit_fraction`` of the genome, then
+        compute the posterior and Viterbi path on every bin with those parameters. The
+        genome is cut into blocks of ``block_bins`` bins and whole blocks are drawn, the
+        same blocks in every sample, so each training piece is a long contiguous chain
+        and conditions are compared on identical loci. The model has only K x M means,
+        M dispersions and K x K transitions, which a few million bins estimate as well
+        as the whole genome; EM time falls in proportion to the fraction.
+        ``None`` (the default) fits on everything.
+    n_jobs
+        Threads for the per-chain forward-backward and Viterbi recursions. Defaults to
+        ``CHROMSTATE_THREADS`` or up to 8 cores; results do not depend on it.
     """
     emission = _resolve_emission(emission, ds)
     if emission == "nb" and not ds.is_count:
@@ -179,6 +194,9 @@ def fit(
         )
 
     X, offsets, chains = ds.X, ds.size_factors, ds.chains
+    if fit_fraction is not None and fit_fraction < 1.0:
+        train = training_blocks(ds, fit_fraction, block_bins, np.random.default_rng(seed))
+        X, offsets, chains = take_chains(X, offsets, train)
     best: Optional[Tuple[float, HMM]] = None
     logliks: List[float] = []
 
@@ -186,7 +204,7 @@ def fit(
     for r in range(limit):
         rng = np.random.default_rng(seed + r)
         em: Emissions = build_emissions(emission, X, offsets, n_states, rng)
-        hmm = HMM(n_states, em, self_transition_prior=self_transition_prior)
+        hmm = HMM(n_states, em, self_transition_prior=self_transition_prior, n_jobs=n_jobs)
         if verbose:
             print(f"restart {r + 1}")
         res = hmm.fit(X, offsets, chains, n_iter=n_iter, tol=tol, verbose=verbose)
@@ -215,8 +233,9 @@ def fit(
         )
     hmm.sort_states_by_signal()
 
-    posterior = hmm.posterior(X, offsets, chains)
-    states = hmm.decode(X, offsets, chains)
+    n_train_rows = int(X.shape[0])
+    X, offsets, chains = ds.X, ds.size_factors, ds.chains
+    posterior, states = hmm.posterior_and_decode(X, offsets, chains)
     labels, colors, rules = annotate_states(hmm.emissions.mean_matrix(), ds.marks,
                                             occupancy=posterior.mean(axis=0))
     collapse = _collapse_diagnostic(hmm, states, n_states)
@@ -238,9 +257,63 @@ def fit(
             "restart_hits_at_best": hits_at_best,
             "converged": hmm.fit_result.converged if hmm.fit_result else False,
             "n_iter": hmm.fit_result.n_iter if hmm.fit_result else 0,
+            "fit_fraction": float(n_train_rows / max(ds.n_rows, 1)),
+            "n_train_rows": n_train_rows,
             **collapse,
         },
     )
+
+
+def training_blocks(
+    ds: ChromStateDataset, fraction: float, block_bins: int, rng: np.random.Generator
+) -> List[slice]:
+    """Row ranges covering about ``fraction`` of the dataset, in whole genomic blocks.
+
+    Blocks are keyed by (chromosome, start // block length), so the same loci are drawn
+    in every sample. Each returned slice lies inside one original chain, so no transition
+    is ever inferred across a chromosome or sample boundary.
+    """
+    if not 0.0 < fraction <= 1.0:
+        raise ValueError(f"fit_fraction must be in (0, 1], got {fraction}")
+    bins = ds.bins
+    width = int(bins["end"].iloc[0] - bins["start"].iloc[0]) or 1
+    block_id = (bins["start"].to_numpy() // (width * max(int(block_bins), 1))).astype(np.int64)
+    keys = pd.Series(list(zip(bins["chrom"].to_numpy(), block_id)))
+    sizes = keys.value_counts()
+    order = rng.permutation(len(sizes))
+    picked, total, target = set(), 0, fraction * ds.n_rows
+    for i in order:
+        picked.add(sizes.index[i])
+        total += int(sizes.iloc[i])
+        if total >= target:
+            break
+    keep = keys.isin(picked).to_numpy()
+
+    out: List[slice] = []
+    for sl in ds.chains:
+        k = keep[sl]
+        if not k.any():
+            continue
+        edges = np.flatnonzero(np.diff(np.r_[0, k.astype(np.int8), 0]))
+        out.extend(slice(sl.start + a, sl.start + b) for a, b in zip(edges[::2], edges[1::2]))
+    return out
+
+
+def take_chains(
+    X: np.ndarray, offsets: np.ndarray, chains: Sequence[slice]
+) -> Tuple[np.ndarray, np.ndarray, List[slice]]:
+    """Copy just the rows in ``chains`` and re-base the slices onto the copy.
+
+    Passing a subset of chains over the full arrays would still evaluate every emission
+    on every row each iteration; compacting first makes EM cost scale with the subset.
+    """
+    idx = np.concatenate([np.arange(sl.start, sl.stop) for sl in chains])
+    new, pos = [], 0
+    for sl in chains:
+        n = sl.stop - sl.start
+        new.append(slice(pos, pos + n))
+        pos += n
+    return X[idx], offsets[idx], new
 
 
 def _collapse_diagnostic(hmm: HMM, states: np.ndarray, n_states: int) -> Dict[str, object]:
@@ -321,6 +394,8 @@ def select_n_states(
     train_chains = [sl for i, sl in enumerate(ds.chains) if i not in test_idx]
     test_chains = [sl for i, sl in enumerate(ds.chains) if i in test_idx]
     n_test_obs = sum(sl.stop - sl.start for sl in test_chains)
+    X_tr, off_tr, train_chains = take_chains(ds.X, ds.size_factors, train_chains)
+    X_te, off_te, test_chains = take_chains(ds.X, ds.size_factors, test_chains)
 
     rows = []
     for k in candidates:
@@ -328,14 +403,14 @@ def select_n_states(
         restart_lls = []
         for r in range(n_restarts):
             rr = np.random.default_rng(seed + 1000 * k + r)
-            em = build_emissions(emission, ds.X, ds.size_factors, k, rr)
+            em = build_emissions(emission, X_tr, off_tr, k, rr)
             hmm = HMM(k, em)
-            res = hmm.fit(ds.X, ds.size_factors, train_chains, n_iter=n_iter)
+            res = hmm.fit(X_tr, off_tr, train_chains, n_iter=n_iter)
             restart_lls.append(res.loglik)
             if res.loglik > best_ll:
                 best_ll, best_hmm = res.loglik, hmm
         assert best_hmm is not None
-        heldout = best_hmm.score(ds.X, ds.size_factors, test_chains)
+        heldout = best_hmm.score(X_te, off_te, test_chains)
         n_train_obs = sum(sl.stop - sl.start for sl in train_chains)
         rows.append(
             {

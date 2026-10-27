@@ -12,8 +12,10 @@ benchmark's held-out likelihood comparison depends on.
 
 from __future__ import annotations
 
+import os
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from typing import List, Optional, Sequence, Tuple
+from typing import Callable, List, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -36,7 +38,29 @@ except ImportError:  # pragma: no cover
 EPS = 1e-300
 
 
-@njit(cache=True)
+def default_threads() -> int:
+    """Threads for per-chain work: ``CHROMSTATE_THREADS`` if set, else up to 8 cores."""
+    env = os.environ.get("CHROMSTATE_THREADS")
+    if env:
+        return max(1, int(env))
+    return max(1, min(8, os.cpu_count() or 1))
+
+
+def map_chains(fn: Callable, chains: Sequence[slice], n_jobs: Optional[int] = None) -> list:
+    """``[fn(chain) for chain in chains]``, run on a thread pool when it can help.
+
+    Chains are independent given the parameters, and the compiled recursions release the
+    GIL, so threads scale without copying the data into worker processes. Results come
+    back in chain order, so sums over them are bit-identical to the serial loop.
+    """
+    n_jobs = default_threads() if n_jobs is None else max(1, int(n_jobs))
+    if n_jobs == 1 or len(chains) < 2:
+        return [fn(sl) for sl in chains]
+    with ThreadPoolExecutor(max_workers=min(n_jobs, len(chains))) as pool:
+        return list(pool.map(fn, chains))
+
+
+@njit(cache=True, nogil=True)
 def _forward_numba(B, A, pi, alpha, c):  # pragma: no cover - compiled
     T, K = B.shape
     for k in range(K):
@@ -66,7 +90,7 @@ def _forward_numba(B, A, pi, alpha, c):  # pragma: no cover - compiled
     return c
 
 
-@njit(cache=True)
+@njit(cache=True, nogil=True)
 def _backward_numba(B, A, c, beta):  # pragma: no cover - compiled
     T, K = B.shape
     for k in range(K):
@@ -142,7 +166,7 @@ def forward_backward(
     return gamma, xi, loglik
 
 
-@njit(cache=True)
+@njit(cache=True, nogil=True)
 def _viterbi_numba(log_B, log_A, log_pi):  # pragma: no cover - compiled
     T, K = log_B.shape
     delta = np.empty((T, K))
@@ -226,8 +250,10 @@ class HMM:
         transitions: Optional[np.ndarray] = None,
         init_probs: Optional[np.ndarray] = None,
         self_transition_prior: float = 0.9,
+        n_jobs: Optional[int] = None,
     ):
         self.n_states = n_states
+        self.n_jobs = n_jobs
         self.emissions = emissions
         if transitions is None:
             off = (1.0 - self_transition_prior) / max(n_states - 1, 1)
@@ -242,9 +268,11 @@ class HMM:
     # -- E step ---------------------------------------------------------------
 
     def _e_step(
-        self, X: np.ndarray, offsets: np.ndarray, chains: Sequence[slice]
+        self, X: np.ndarray, offsets: np.ndarray, chains: Sequence[slice],
+        log_B: Optional[np.ndarray] = None,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, float]:
-        log_B = self.emissions.log_prob(X, offsets)
+        if log_B is None:
+            log_B = self.emissions.log_prob(X, offsets)
         # Zeros, not np.empty: `chains` need not cover every row of X. Held-out model
         # selection fits on a subset of chromosomes, and with np.empty the uncovered
         # rows would carry uninitialised memory into the M-step as if it were
@@ -254,8 +282,10 @@ class HMM:
         xi_sum = np.zeros((self.n_states, self.n_states))
         init_sum = np.zeros(self.n_states)
         loglik = 0.0
-        for sl in chains:
-            g, xi, ll = forward_backward(log_B[sl], self.transitions, self.init_probs)
+        A, pi = self.transitions, self.init_probs
+        results = map_chains(lambda sl: forward_backward(log_B[sl], A, pi), chains,
+                             getattr(self, "n_jobs", None))
+        for sl, (g, xi, ll) in zip(chains, results):
             gamma[sl] = g
             xi_sum += xi
             init_sum += g[0]
@@ -313,22 +343,35 @@ class HMM:
         gamma, _, _, _ = self._e_step(X, offsets, chains)
         return gamma
 
-    def decode(
+    def posterior_and_decode(
         self, X: np.ndarray, offsets: np.ndarray, chains: Sequence[slice]
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """Posterior and Viterbi path from one evaluation of the emission likelihood."""
+        log_B = self.emissions.log_prob(X, offsets)
+        gamma = self._e_step(X, offsets, chains, log_B=log_B)[0]
+        return gamma, self.decode(X, offsets, chains, log_B=log_B)
+
+    def decode(
+        self, X: np.ndarray, offsets: np.ndarray, chains: Sequence[slice],
+        log_B: Optional[np.ndarray] = None,
     ) -> np.ndarray:
         """Viterbi path -- the ChromHMM-style hard segmentation, for comparison."""
-        log_B = self.emissions.log_prob(X, offsets)
+        if log_B is None:
+            log_B = self.emissions.log_prob(X, offsets)
         path = np.empty(X.shape[0], dtype=np.int32)
-        for sl in chains:
-            path[sl] = viterbi(log_B[sl], self.transitions, self.init_probs)
+        A, pi = self.transitions, self.init_probs
+        paths = map_chains(lambda sl: viterbi(log_B[sl], A, pi), chains,
+                           getattr(self, "n_jobs", None))
+        for sl, p in zip(chains, paths):
+            path[sl] = p
         return path
 
     def score(self, X: np.ndarray, offsets: np.ndarray, chains: Sequence[slice]) -> float:
         """Log-likelihood of data under the current parameters (used for held-out scoring)."""
         log_B = self.emissions.log_prob(X, offsets)
-        return float(
-            sum(forward_backward(log_B[sl], self.transitions, self.init_probs)[2] for sl in chains)
-        )
+        A, pi = self.transitions, self.init_probs
+        return float(sum(map_chains(lambda sl: forward_backward(log_B[sl], A, pi)[2], chains,
+                                    getattr(self, "n_jobs", None))))
 
     # -- model selection ------------------------------------------------------
 

@@ -58,6 +58,7 @@ class _PairCache:
     def __init__(self) -> None:
         self.key = None
         self.pairs = None
+        self.collapsers = None
 
     def get(self, X: np.ndarray, offsets: np.ndarray):
         key = (id(X), id(offsets), X.shape,
@@ -65,8 +66,26 @@ class _PairCache:
                float(offsets[:: max(1, len(offsets) // 997)].sum()))
         if key != self.key:
             self.pairs = [_pair_index(X, offsets, m) for m in range(X.shape[1])]
+            self.collapsers = [None] * X.shape[1]
             self.key = key
         return self.pairs
+
+    def collapse(self, m: int, gamma: np.ndarray) -> np.ndarray:
+        """``(n_pairs, K)`` responsibilities summed over the rows sharing each pair.
+
+        A sparse (pair x row) indicator times ``gamma`` does this in one pass. The
+        earlier per-state ``np.bincount`` loop re-read the row index K times and was a
+        quarter of total fitting time on 800k bins.
+        """
+        if self.collapsers[m] is None:
+            from scipy import sparse
+
+            x, _, inv = self.pairs[m]
+            n = len(inv)
+            self.collapsers[m] = sparse.csr_matrix(
+                (np.ones(n), (inv, np.arange(n))), shape=(len(x), n)
+            )
+        return np.asarray(self.collapsers[m] @ gamma)
 
 
 class Emissions:
@@ -108,7 +127,8 @@ class Emissions:
 
 
 def seed_clusters(
-    Z: np.ndarray, n_states: int, rng: np.random.Generator, n_init: int = 4
+    Z: np.ndarray, n_states: int, rng: np.random.Generator, n_init: int = 4,
+    max_fit_rows: int = 200_000,
 ) -> np.ndarray:
     """Seed state assignments by k-means on the per-mark signal *profile*.
 
@@ -126,12 +146,20 @@ def seed_clusters(
     which flattens the likelihood for exactly the marks that would have separated them.
 
     ``rng`` seeds k-means, so restarts still explore different initialisations.
+
+    Centroids are fitted on at most ``max_fit_rows`` randomly chosen rows and every row is
+    then assigned to its nearest centroid. This is only a starting point for EM, and 200k
+    rows pin down K x M centroids far more tightly than EM needs; fitting on every bin
+    was a sixth of total runtime on 800k bins.
     """
     from sklearn.cluster import KMeans
 
     seed = int(rng.integers(0, 2**31 - 1))
-    km = KMeans(n_clusters=n_states, n_init=n_init, random_state=seed).fit(Z)
-    return km.labels_.astype(int)
+    km = KMeans(n_clusters=n_states, n_init=n_init, random_state=seed)
+    if len(Z) > max_fit_rows:
+        sub = rng.choice(len(Z), size=max_fit_rows, replace=False)
+        return km.fit(Z[sub]).predict(Z).astype(int)
+    return km.fit(Z).labels_.astype(int)
 
 
 def _cluster_moments(
@@ -269,12 +297,9 @@ class NegativeBinomialEmissions(Emissions):
         collapsed onto those pairs with their responsibilities summed, which gives the
         same objective while making each optimiser step independent of genome size.
         """
-        for m, (x, off, inv) in enumerate(self._cache().get(X, offsets)):
-            weights = np.stack(
-                [np.bincount(inv, weights=gamma[:, k], minlength=len(x))
-                 for k in range(gamma.shape[1])],
-                axis=1,
-            )
+        cache = self._cache()
+        for m, (x, off, _inv) in enumerate(cache.get(X, offsets)):
+            weights = cache.collapse(m, gamma)
             means = np.maximum(off[:, None] * self.mu[:, m][None, :], MIN_MEAN)
 
             def neg_ll(log_r: float, x=x, means=means, weights=weights) -> float:
