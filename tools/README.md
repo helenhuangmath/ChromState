@@ -159,8 +159,9 @@ bash tools/setup/benchrun.sh python tools/run_tools.py check   # all four should
 5. `build_dihmm.sh`: one `clang++` command instead of upstream's Python-2.7 CMake setup,
    serial (upstream's OpenMP loop has a data race), Armadillo checks compiled out.
 
-**Segway** was not installed: GMTK has no macOS build, and the Docker daemon on the
-benchmark machine was not running. With a working Docker, a `linux/amd64` image with
+**Segway: not run — the Docker CLI hung on this Mac (linux/amd64 emulation required).**
+GMTK has no macOS build, so Segway needs a linux/amd64 container, and on the benchmark
+machine `docker info` hung and the daemon socket timed out. With a working Docker, a `linux/amd64` image with
 `conda install -c bioconda segway` is the route; the `tools.json` entry then needs a
 genomedata archive built from the exported counts and a second step, `segway annotate`
 (called `identify` before Segway 3).

@@ -24,9 +24,9 @@ for path in (os.path.join(ROOT, "src"), HERE):
         sys.path.insert(0, path)
 
 import pandas as pd  # noqa: E402
+from toolbench.report import plot_scaling  # noqa: E402
 
 from chromstate import viz  # noqa: E402
-from toolbench.report import plot_scaling  # noqa: E402
 
 #: Short names for a double-column figure; "real" marks the published software.
 SHORT_NAMES = {

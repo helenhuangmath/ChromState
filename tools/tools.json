@@ -42,7 +42,7 @@
       ],
       "verified": false,
       "how_to_enable": "install Segway + GMTK, build a genomedata archive from the exported counts, then: export SEGWAY_GENOMEDATA=/path/to/archive",
-      "notes": "NOT RUN in this repository: Segway needs GMTK, which is Linux-only (no osx-arm64 build on bioconda), and the Docker daemon on the benchmark machine did not respond. Two-step tool: `segway train` then `segway annotate` (formerly `identify`) writes the BED; extend this entry or add a methods/ adapter that also builds the genomedata archive"
+      "notes": "NOT RUN: Docker CLI hung on the benchmark Mac (linux/amd64 emulation required; GMTK is Linux-only, no osx-arm64 build). Two-step tool: `segway train` then `segway annotate` (formerly `identify`) writes the BED; extend this entry or add a methods/ adapter that also builds the genomedata archive"
     },
     {
       "key": "epigenome_ssm",

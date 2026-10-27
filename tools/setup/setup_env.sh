@@ -14,8 +14,8 @@
 # R 4.5.3, normR 1.36.0 (Bioconductor 3.22 source), diHMM ykai16@c5a4bd9.
 #
 # Honest note: the env was built in several increments while finding out what each tool
-# needed; the single `create` below is the union of those installs and its solve was
-# checked with --dry-run, but this script as a whole has not been re-run from scratch.
+# needed; the single `create` below is the union of those installs. Neither its solve
+# nor this script as a whole has been re-run from scratch.
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BENCH="${BENCH:-$HOME/tools/chromstate-bench}"
