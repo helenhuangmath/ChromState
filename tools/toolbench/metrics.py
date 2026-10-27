@@ -110,6 +110,58 @@ def _magnitude(ctx: EvalContext) -> Dict[str, float]:
     return {"signal_spearman": float(out["spearman"]), "signal_pearson": float(out["pearson"])}
 
 
+def _bivalency_posthoc(ctx: EvalContext) -> Dict[str, float]:
+    """Bivalency AUPRC with one scoring rule for every tool, from its partition alone.
+
+    The ``bivalency`` metric scores whatever ``bivalency_score`` a run carries: in-process
+    methods derive it from their own fitted emission means, external tools from the
+    post-hoc profile in :mod:`toolbench.scores`. Those are different inputs to the same
+    formula, so a gap between an internal and an external row could come from the
+    scoring route rather than the segmentation. This metric removes that: every run --
+    internal or external -- is re-scored with :func:`toolbench.scores.posthoc_scores` on
+    its own states (and posterior, where it has a proper state posterior).
+    """
+    from .scores import posthoc_scores
+
+    truth = ctx.truth
+    if getattr(truth, "bivalent_state", None) is None or ctx.run.n_states <= 1:
+        return {}
+    post = ctx.run.posterior
+    if post is not None and post.shape[1] != ctx.run.n_states:
+        post = None
+    biv, _ = posthoc_scores(ctx.ds, ctx.run.states, post, ctx.run.n_states)
+    positive = np.asarray(truth.states) == truth.bivalent_state
+    det = M.detection_scores(biv, positive)
+    return {"biv_posthoc_auprc": float(det["auprc"]), "biv_posthoc_auroc": float(det["auroc"])}
+
+
+def _domains(ctx: EvalContext) -> Dict[str, float]:
+    """diHMM's domain-level labels, described -- the simulator has no domain truth.
+
+    Reports how many domain states are used and how long domain segments are, plus the
+    adjusted Rand index of domain labels against the *bin-level* truth, which is only a
+    description of how much bin-state information the coarser layer carries.
+    """
+    dom = ctx.run.meta.get("domain_states") if ctx.run.meta else None
+    if dom is None:
+        return {}
+    dom = np.asarray(dom)
+    keep = dom != UNASSIGNED
+    bins = ctx.ds.bins.reset_index(drop=True)
+    bin_size = int(bins["end"].iloc[0] - bins["start"].iloc[0])
+    n_seg = 0
+    for _, grp in bins.groupby(["sample", "chrom"], sort=False):
+        seq = dom[grp.index.to_numpy()]
+        seq = seq[seq != UNASSIGNED]
+        n_seg += (1 + int((seq[1:] != seq[:-1]).sum())) if seq.size else 0
+    out = {"domain_states_used": float(len(np.unique(dom[keep]))),
+           "domain_mean_segment_kb": float(keep.sum() * bin_size / max(n_seg, 1) / 1e3)}
+    if ctx.truth is not None:
+        out["domain_ari_vs_bin_truth"] = float(M.segmentation_agreement(
+            np.asarray(ctx.truth.states)[keep], dom[keep])["ari"])
+    return out
+
+
 def _calibration(ctx: EvalContext) -> Dict[str, float]:
     true = ctx.true_states()
     post = ctx.run.posterior
@@ -223,6 +275,25 @@ METRICS: Dict[str, Metric] = {
         ("signal_spearman", "signal_pearson"),
         ("truth", "activity"),
         _magnitude,
+    ),
+    "bivalency_posthoc": Metric(
+        "bivalency_posthoc",
+        "Bivalency AUPRC/AUROC with one scoring rule for every tool: each state's "
+        "posterior-weighted mean normalised count, then the shared harmonic-mean "
+        "formula. Separates segmentation quality from how a tool's score was derived.",
+        ("biv_posthoc_auprc", "biv_posthoc_auroc"),
+        ("truth",),
+        _bivalency_posthoc,
+    ),
+    "domains": Metric(
+        "domains",
+        "Descriptive summary of a second, domain-level label where a tool has one "
+        "(diHMM): domain states used, mean domain segment length, and agreement of the "
+        "domain label with the bin-level truth. Not a correctness score.",
+        ("domain_states_used", "domain_mean_segment_kb", "domain_ari_vs_bin_truth"),
+        (),
+        _domains,
+        higher_is_better=None,
     ),
     "calibration": Metric(
         "calibration",

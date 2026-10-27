@@ -272,3 +272,47 @@ def test_real_tool_adapters_skip_cleanly_when_not_configured(adapter, var, monke
     assert not avail.available and var in avail.detail and avail.how_to_enable
     run = adapter.run(tiny[0], 3, 0, str(tmp_path), 10.0)
     assert run.status == "skipped" and run.reason
+
+
+def test_a_chatty_tool_does_not_deadlock_the_runner(tmp_path):
+    """Regression: output used to go to an unread pipe, so >64 KB of logging hung forever."""
+    from toolbench.core import run_command
+
+    code = "import sys\nfor i in range(40000): print('EM iteration', i, 'x' * 40)\n" \
+           "sys.stderr.write('e' * 200000)\n"
+    res = run_command([sys.executable, "-c", code], timeout_s=60,
+                      log_path=str(tmp_path / "log.txt"))
+    assert res.returncode == 0 and not res.timed_out
+    assert res.stdout.count("EM iteration") == 40000
+    assert len(res.stderr) == 200000
+
+
+def test_posthoc_bivalency_metric_scores_every_row_the_same_way(tiny):
+    from toolbench.core import ToolRun
+    from toolbench.metrics import METRICS, EvalContext
+
+    ds, truth = tiny
+    states = np.asarray(truth.states, dtype=np.int64)
+    perfect = ToolRun(tool="p", display_name="P", states=states, n_states=truth.n_states)
+    shuffled = ToolRun(tool="s", display_name="S", n_states=truth.n_states,
+                       states=np.random.default_rng(0).permutation(states))
+    fn = METRICS["bivalency_posthoc"].fn
+    good = fn(EvalContext(run=perfect, ds=ds, truth=truth))["biv_posthoc_auprc"]
+    bad = fn(EvalContext(run=shuffled, ds=ds, truth=truth))["biv_posthoc_auprc"]
+    assert good > 0.9 and bad < good
+
+
+def test_domain_metric_only_applies_to_runs_with_domain_labels(tiny):
+    from toolbench.core import ToolRun
+    from toolbench.metrics import METRICS, EvalContext
+
+    ds, truth = tiny
+    states = np.asarray(truth.states, dtype=np.int64)
+    plain = ToolRun(tool="x", display_name="X", states=states, n_states=7)
+    assert METRICS["domains"].fn(EvalContext(run=plain, ds=ds, truth=truth)) == {}
+    dom = (np.arange(ds.n_rows) // 20) % 2
+    two = ToolRun(tool="d", display_name="D", states=states, n_states=7,
+                  meta={"domain_states": dom})
+    out = METRICS["domains"].fn(EvalContext(run=two, ds=ds, truth=truth))
+    assert out["domain_states_used"] == 2
+    assert out["domain_mean_segment_kb"] == pytest.approx(4.0)
