@@ -22,8 +22,15 @@ ChromState by construction. Under that caveat:
   ChromState timing uses numba, which is optional. Memory use is comparable once the
   data ChromState holds in-process is accounted for.
 * **What these numbers rest on.** All four real tools in this table ran and were checked
-  against their own outputs. Segway did not run: the Docker CLI hung on this Mac, and Segway needs linux/amd64 emulation (§3.4). diHMM needed bug fixes to run at
-  all, and its row is a lower bound (§3.3).
+  against their own outputs. Segway did not run on the Mac (§3.4) but did on real data
+  on a Linux cluster (§2.3). diHMM needed bug fixes to run at all, and its row is a
+  lower bound (§3.3).
+* **On real data (§2.3, CD8 T-cell CUT&RUN, six tools including Segway).** Expression
+  *level* is predicted equally well by every tool's promoter states (rho 0.56-0.61,
+  raw marks 0.60). Expression *change* between naive and exhausted cells separates them:
+  ChromState 0.36, EpiCSeg 0.30, the binarised tools 0.23, Segway 0.12. EpiCSeg finds
+  promoters best (AUPRC 0.23), ChromState second (0.21). ChromState is the fastest
+  (25 s for 921k bin-rows; Segway and diHMM an hour each).
 
 ## 1. What each tool is
 
@@ -116,6 +123,34 @@ What the table supports:
   states were used, the mean domain segment was 7.5 kb, and domain labels agree with the
   bin-level truth at ARI 0.19.
 
+
+### 2.1b Detecting the perturbation (condition change), simulated truth
+
+The condition-comparison claim rests on detecting which bins moved between the control and
+the treated sample. Added in v0.3 as the `perturbation` metric: each tool's control-versus-
+treated change per bin (total-variation distance of its posteriors, or a changed hard
+call when it has none) is scored against the simulated responders (3.0% of bins). Same
+data and command as §2.1 (`sbatch/simbench.sbatch`, 2026-11-02; K = 7).
+
+| Tool | Change score | Responder AUPRC | AUROC | Fraction of bins called changed | ARI (same run) |
+|---|---|---|---|---|---|
+| ChromState | posterior TV | **0.632** | **0.966** | 0.09 | 0.844 |
+| ChromHMM-like (reimplementation) | posterior TV | 0.581 | 0.946 | 0.27 | 0.705 |
+| Segway-like (reimplementation) | posterior TV | 0.536 | 0.957 | 0.09 | 0.832 |
+| EpiCSeg 1.0 | posterior TV | 0.396 | 0.887 | 0.24 | 0.672 |
+| GMM | posterior TV | 0.337 | 0.915 | 0.19 | 0.654 |
+| ChromHMM 1.28 | posterior TV | 0.214 | 0.910 | 0.28 | 0.743 |
+| k-means | hard call | 0.127 | 0.873 | 0.20 | 0.697 |
+| diHMM | hard call | 0.070 | 0.785 | 0.38 | 0.302 |
+| normR | per-mark calls | 0.057 | 0.748 | 0.50 | 0.483 |
+
+Baseline AUPRC (random ranking) is 0.030. ChromState ranks the responders best and calls
+the fewest bins changed while doing so; the binarised tools call a quarter of the genome
+changed because a one-bin flip of a saturated posterior counts as much as a real shift.
+The caveat of §3.1 applies in full: the simulation is drawn from ChromState's model
+family. Real-data differential testing needs chromatin replicates, which the CD8 tracks
+at hand do not have (Tutorial 3, §6).
+
 ### 2.2 Runtime and memory against dataset size
 
 Same simulator, four chromosomes, two conditions, three sizes (6,250 / 25,000 / 100,000
@@ -154,6 +189,74 @@ tools, peak memory is the tool's process tree. Raw numbers:
   single-threaded (§3.3).
 * normR's ~1 GB is mostly the R/Bioconductor session it runs in, not its model.
 
+
+### 2.3 Real data: CD8 T-cell CUT&RUN, every tool on the same bins
+
+Simulation cannot settle how the tools behave on a real genome, so the same six were run
+on real data: the Sci Rep 2025 P14 CD8 T-cell CUT&RUN (naive, memory/Arm, exhausted/Cl13;
+H3K4me3, H3K27ac, H3K27me3, H3K9me3; replicate-pooled DESeq2-scaled coverage per 200 bp
+bin, rounded to counts), chromosome 19 in full: 307,158 bins x 3 conditions = 921,474
+bin-rows. Every tool was asked for 15 states, the number the published ChromState model
+used, and run on a Linux cluster node (8 cores). Segway could run here (Linux), so this
+is the first row for it. Commands and the figure definitions are in
+[`tools/README.md`](../tools/README.md#real-data-the-same-tools-on-the-cd8-t-cell-cutrun-bins);
+results, figures (PDF and PNG), the tables and `REPORT.md` are in
+[`figures/tool_comparison/realdata_cd8_chr19/`](figures/tool_comparison/realdata_cd8_chr19/)
+(the raw run folders stay under the git-ignored `tmp/realbench/`).
+
+There is no state truth on real data. Each tool is therefore scored on *external*
+facts it never saw -- GENCODE vM25 protein-coding genes and the RNA-seq of the same
+cells -- with identical cross-validation for every row.
+
+| Tool | Segments (mean kb) | Promoter recovery AUPRC (any TSS / active TSS; chance 0.022 / 0.007) | Expression level rho | Expression change rho (Cl13 - Naive) | Agreement with ChromState (ARI) | Runtime (s) | Peak memory (MB) |
+|---|---|---|---|---|---|---|---|
+| ChromState | 3.40 | 0.205 / **0.238** | 0.58 | **0.36** | -- | **25** | (in-process) |
+| ChromHMM 1.28 (`-init random`) | 2.33 | 0.171 / 0.189 | 0.56 | 0.23 | 0.13 | 65 | 1527 |
+| EpiCSeg 1.0 | 3.81 | **0.233** / **0.251** | 0.56 | 0.30 | 0.62 | 51 | 827 |
+| normR 1.28 (16 mark patterns) | 1.20 | 0.143 / 0.143 | 0.59 | 0.23 | 0.22 | 22 | 1043 |
+| diHMM (C++) | 2.71 | 0.161 / 0.183 | 0.58 | 0.23 | 0.05 | 3501 | 6549 |
+| Segway 3.0.7 (10 training rounds) | 2.88 | 0.149 / 0.168 | **0.61** | 0.12 | 0.48 | 3498 | 4667 |
+| Raw mark signal, no states | -- | -- | 0.60 | 0.34 | -- | -- | -- |
+
+*Promoter recovery*: per bin the score is its state's promoter rate learned on the other
+half of the 1 Mb blocks (two-fold), so a tool gains nothing from merely having many
+states; "active TSS" positives are TSS bins of the top-30 % expressed genes in that
+condition. *Expression*: gradient boosting on the promoter's (TSS +/- 1 kb) state
+composition, five-fold by 1 Mb block, Spearman on held-out genes (1,500 gene x condition
+rows; 500 genes for change); bootstrap 95 % intervals are about +/- 0.04 for level and
++/- 0.09 for change. Figures: `state_profiles` (what each state of each tool is, in
+marks), `state_class_fractions`, `segment_lengths`, `state_overlap`, `tool_agreement`,
+`promoter_recovery`, `expression_prediction`, and three locus views
+(*Cd274*/*Pdcd1lg2*/*Jak2*, *Fas*, *Cd5*/*Cd6*).
+
+What the real-data rows support:
+
+* **The count-based tools agree with each other and the binarised tools do not.**
+  ChromState, EpiCSeg and Segway form one cluster (pairwise ARI 0.44-0.62); ChromHMM and
+  diHMM form another (0.51), with normR between. The split is the input, not the
+  algorithm: ChromHMM and diHMM see the same presence calls.
+* **Expression *level* does not separate the tools.** Every segmentation predicts level
+  about as well as the raw marks at the promoter (rho 0.56-0.61 against 0.60): the
+  level is carried by H3K4me3/H3K27ac at the TSS, and any 15-state partition keeps it.
+  This is the ceiling of the task, not a tie between methods.
+* **Expression *change* does.** Predicting how much a gene's expression moves from naive
+  to exhausted from how its promoter composition moves, ChromState (0.36) is the only
+  tool at the level of the raw marks (0.34); EpiCSeg follows (0.30), the binarised
+  tools and normR sit at 0.23, Segway at 0.12. Change is where quantitative posteriors
+  matter: a hard-called or presence-based state cannot move by a little.
+* **Promoters: EpiCSeg first, ChromState second**, on both the any-TSS and the
+  active-TSS task (0.233/0.251 against 0.205/0.238); the rest are 0.14-0.19. This is the
+  same ordering as bivalency on the simulation: EpiCSeg's finer promoter states are its
+  strength.
+* **Cost.** ChromState 25 s, EpiCSeg 51 s, ChromHMM 65 s for 921k bin-rows; diHMM and
+  Segway each needed 58 minutes and 4.7-6.5 GB. Segway was capped at 10 training rounds
+  and one instance (its defaults would run several restarts to convergence, which would
+  take days on this input); its row is therefore a lower bound on Segway, as diHMM's is.
+* **Class shares differ more than the biology does.** On the same bins the tools put
+  between 2.8 % (ChromHMM) and 6 % (EpiCSeg, normR) of the genome in active states and
+  between 7 % and 29 % in Polycomb states, because each cuts the mark continuum at
+  different points; condition differences (exhausted cells lose H3K9me3 and gain
+  quiescent share) are consistent across tools.
 
 ## 3. Caveats: read these before quoting a number
 
@@ -223,13 +326,15 @@ labels have no ground truth in this simulation and are reported only descriptive
 
 ### 3.4 What did not run
 
-* **Segway: not run, because the Docker CLI hung on this Mac (linux/amd64 emulation
-  required).** GMTK, Segway's inference engine, is Linux-only (no osx-arm64 conda build),
-  so on macOS Segway needs a linux/amd64 container. On the benchmark machine
-  `docker info` hung and the daemon socket timed out after 30 s (pre-existing
-  `docker context ls` calls were also hung). Docker was not retried or restarted. The `tools.json` entry stays disabled and `verified: false`. The
-  Segway-like row is ChromState's own Gaussian-HMM reimplementation and says nothing
-  about Segway the software.
+* **Segway did not run in the macOS simulation benchmark (§2.1-2.2)**: GMTK, its
+  inference engine, is Linux-only, and the Docker CLI hung on that machine. It *did* run
+  on the real data (§2.3) on a Linux cluster, through the adapter in
+  `tools/toolbench/methods/segway.py` (one genomedata archive with the samples as
+  pseudo-chromosomes, `segway train` capped at 10 rounds, `segway annotate`; hard labels
+  only). The adapter is marked `verified: false` until its output mapping has been
+  checked against Segway's own files beyond the one run reported here. The Segway-like
+  row of §2.1 is ChromState's own Gaussian-HMM reimplementation and says nothing about
+  Segway the software.
 * **epigenome-ssm** was not attempted. It is shipped as a disabled, unverified template.
 * **The original diHMM** (MATLAB, gcyuan/diHMM) was not run, because no MATLAB was
   available. Only the C++ reimplementation was.

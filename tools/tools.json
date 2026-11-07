@@ -8,42 +8,10 @@
     "--dry-run to see the exact command that will be executed, and fix it here if the",
     "installed version disagrees. Placeholders: {workdir} {outdir} {counts} {regions}",
     "{binary_dir} {n_states} {seed} {bin_size} {sample} {env:VAR}.",
-    "EpiCSeg, normR and diHMM now have dedicated, verified adapters in toolbench/methods/; ChromHMM in methods/chromhmm.py."
+    "EpiCSeg, normR and diHMM now have dedicated, verified adapters in toolbench/methods/; ChromHMM in methods/chromhmm.py.",
+    "Segway now has a dedicated adapter in toolbench/methods/segway.py (Linux; bioconda env)."
   ],
   "tools": [
-    {
-      "key": "segway",
-      "display_name": "Segway (dynamic Bayesian network)",
-      "stands_for": "the other widely used segmenter; continuous signal, no binarisation",
-      "enabled": false,
-      "requires_env": [
-        "SEGWAY_GENOMEDATA"
-      ],
-      "requires_binary": "segway",
-      "input_format": "count_matrix",
-      "command": [
-        "segway",
-        "train",
-        "--num-labels",
-        "{n_states}",
-        "--seed",
-        "{seed}",
-        "{env:SEGWAY_GENOMEDATA}",
-        "{outdir}/traindir"
-      ],
-      "output": {
-        "format": "segmentation_bed",
-        "path": "{outdir}/identifydir/segway.bed",
-        "per_sample": false
-      },
-      "version_command": [
-        "segway",
-        "--version"
-      ],
-      "verified": false,
-      "how_to_enable": "install Segway + GMTK, build a genomedata archive from the exported counts, then: export SEGWAY_GENOMEDATA=/path/to/archive",
-      "notes": "NOT RUN: Docker CLI hung on the benchmark Mac (linux/amd64 emulation required; GMTK is Linux-only, no osx-arm64 build). Two-step tool: `segway train` then `segway annotate` (formerly `identify`) writes the BED; extend this entry or add a methods/ adapter that also builds the genomedata archive"
-    },
     {
       "key": "epigenome_ssm",
       "display_name": "epigenome-ssm (continuous state-space model)",

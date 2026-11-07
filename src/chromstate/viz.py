@@ -4,15 +4,26 @@ Colour policy
 -------------
 Two categorical palettes ship, and the choice is a real tradeoff rather than a preference:
 
-``roadmap`` (default)
+``scirep2025`` (default)
+    The scheme of Huang, Baxter et al., Sci Rep 2025 (Supplementary Fig. S4a): active
+    states in reds, poised in magenta, repressed in blues, repetitive/heterochromatin in
+    violet, low signal in grey. Hex values sampled from the published figure.
+
+``nature``
+    The Okabe-Ito scheme (Wong, Nature Methods 2011), the colourblind-safe palette
+    Nature's figure guidelines recommend: one hue per state family, lighter tints for
+    weak variants, light grey for quiescent. Use for papers, posters and talks.
+
+``roadmap``
     The Roadmap Epigenomics scheme every ChromHMM user already reads at a glance -- red
     promoters, yellow enhancers, green transcription, grey Polycomb. It is *not*
     colourblind-safe, and not marginally so: TssA (``#FF0000``) and TssFlnk (``#FF4500``)
     sit at ΔE 3.0 for normal vision and 3.0 under deuteranopia, far below the ΔE 15 floor
     at which two colours are reliably distinguishable at all. Several states also fall
-    below 3:1 contrast on white. It is the default only because field recognisability has
+    below 3:1 contrast on white. Field recognisability has
     real value, and every plot here carries direct labels so colour never carries meaning
-    alone.
+    alone. Segment BED files always carry Roadmap colours so browsers show the familiar
+    track.
 
 ``cvd``
     Eight hues in a fixed, validated order (worst adjacent pair ΔE 9.1 under protanopia,
@@ -46,7 +57,14 @@ import pandas as pd
 from matplotlib.colors import LinearSegmentedColormap, TwoSlopeNorm
 from matplotlib.patches import Patch
 
-from .model.annotate import STATE_COLORS, full_state_name
+from .model.annotate import (
+    OKABE_ITO,
+    SCIREP2025_GROUP_COLORS,
+    STATE_COLORS,
+    STATE_COLORS_NATURE,
+    STATE_COLORS_SCIREP2025,
+    full_state_name,
+)
 from .model.core import Segmentation
 
 # -- type --------------------------------------------------------------------
@@ -212,10 +230,45 @@ def _title(ax: plt.Axes, text: str, subtitle: Optional[str] = None) -> None:
         )
 
 
-def state_colors(seg: Segmentation, palette: str = "roadmap") -> List[str]:
-    """Resolve per-state colours under the requested palette."""
+DEFAULT_PALETTE = "scirep2025"
+
+
+def _shade(hex_color: str, amount: float) -> str:
+    """Lighten a colour towards white by ``amount`` (0-1), for duplicate mnemonics."""
+    h = hex_color.lstrip("#")
+    rgb = [int(h[i:i + 2], 16) for i in (0, 2, 4)]
+    rgb = [int(round(v + (255 - v) * min(max(amount, 0.0), 0.8))) for v in rgb]
+    return "#{:02X}{:02X}{:02X}".format(*rgb)
+
+
+def state_colors(seg: Segmentation, palette: str = DEFAULT_PALETTE) -> List[str]:
+    """Resolve per-state colours under the requested palette.
+
+    ``scirep2025`` (default): the scheme of Huang et al., Sci Rep 2025 (Supplementary
+    Fig. S4a) -- active states in reds, poised in magenta, repressed in blues,
+    heterochromatin in violet, low signal in grey (``STATE_COLORS_SCIREP2025``).
+    ``nature``: the Okabe-Ito colourblind-safe scheme, one hue per state family
+    (``STATE_COLORS_NATURE``). In both, a second state of the same family takes a
+    lighter shade and unnamed families take spare Okabe-Ito hues. ``roadmap``: the
+    Roadmap Epigenomics colours ChromHMM users know (not colourblind-safe). ``cvd``:
+    eight validated hues in a fixed order, ignoring state identity.
+    """
     if palette == "roadmap":
         return list(seg.colors)
+    if palette in ("nature", "scirep2025"):
+        table = STATE_COLORS_NATURE if palette == "nature" else STATE_COLORS_SCIREP2025
+        out, used = [], set()
+        for lbl in seg.labels:
+            base = str(lbl).split("_")[0]
+            c = table.get(base)
+            if c is None:
+                free = [h for h in OKABE_ITO if h not in used] or OKABE_ITO
+                c = free[0]
+            elif c in used and base != "Quies":
+                c = _shade(c, 0.22 * (1 + sum(1 for u in out if u.startswith(c[:4]))))
+            used.add(c)
+            out.append(c)
+        return out
     if palette == "cvd":
         if seg.n_states > len(CVD_PALETTE):
             # Never cycle hues: states past the cap share the "Other" grey and rely on
@@ -225,7 +278,7 @@ def state_colors(seg: Segmentation, palette: str = "roadmap") -> List[str]:
                 for i in range(seg.n_states)
             ]
         return CVD_PALETTE[: seg.n_states]
-    raise ValueError(f"Unknown palette {palette!r}; expected 'roadmap' or 'cvd'")
+    raise ValueError(f"Unknown palette {palette!r}; expected 'scirep2025', 'nature', 'roadmap' or 'cvd'")
 
 
 # ---------------------------------------------------------------------------
@@ -317,7 +370,7 @@ def plot_transition_heatmap(seg: Segmentation, figsize=(WIDTH_MID, 3.9)):
     return fig
 
 
-def plot_state_coverage(seg: Segmentation, palette: str = "roadmap", figsize=(WIDTH_MID, 2.6)):
+def plot_state_coverage(seg: Segmentation, palette: str = DEFAULT_PALETTE, figsize=(WIDTH_MID, 2.6)):
     """Genome coverage per state, hard assignment versus soft posterior mass.
 
     The gap between the two bars is informative: a state whose soft mass exceeds its hard
@@ -362,7 +415,7 @@ def plot_segmentation_track(
     start: Optional[int] = None,
     end: Optional[int] = None,
     max_bins: int = 600,
-    palette: str = "roadmap",
+    palette: str = DEFAULT_PALETTE,
     figsize=(WIDTH_DOUBLE, 4.2),
 ):
     """Genome-browser view: signal, hard segmentation, and posterior composition.
@@ -737,7 +790,7 @@ def plot_calibration(
     ax.set_ylim(0, 1.02)
     _title(ax, "Calibration",
            "below the diagonal = the model is overconfident")
-    leg = ax.legend(frameon=False, fontsize=FS_LEGEND, loc="upper left")
+    leg = ax.legend(frameon=False, fontsize=FS_LEGEND, loc="lower right")
     for t in leg.get_texts():
         t.set_color(INK2)
     fig.tight_layout()
@@ -850,6 +903,28 @@ def plot_model_selection(table: pd.DataFrame, figsize=(WIDTH_MID, 2.2)):
 # ---------------------------------------------------------------------------
 
 
+def _stagger_labels(ax: plt.Axes, points, fontsize: float = FS_ANNOT, step: float = 7.0) -> None:
+    """Annotate ``(x, y, text)`` points without overlap or clipping.
+
+    Labels go to the right of points in the left half of the axis and to the left of
+    points in the right half; among labels that share (nearly) the same height, each is
+    dropped one step below the previous, with a thin leader back to the point.
+    """
+    if not points:
+        return
+    x0, x1 = ax.get_xlim()
+    mid = 0.5 * (x0 + x1)
+    pts = sorted(points, key=lambda t: (-t[1], t[0]))
+    placed = []  # (y, k) of labels already placed
+    for x, y, text in pts:
+        k = sum(1 for (py, _) in placed if abs(py - y) < 0.08 * (ax.get_ylim()[1] - ax.get_ylim()[0]))
+        placed.append((y, k))
+        right = x <= mid
+        ax.annotate(text, (x, y), xytext=(4 if right else -4, -1 - step * k), textcoords="offset points",
+                    fontsize=fontsize, color=INK, ha="left" if right else "right", va="top",
+                    arrowprops=dict(arrowstyle="-", color=MUTED, linewidth=0.4, shrinkA=0, shrinkB=1))
+
+
 def plot_change_volcano(
     table: pd.DataFrame,
     noise_floor: Optional[float] = None,
@@ -895,12 +970,8 @@ def plot_change_volcano(
                 color=MUTED, fontsize=FS_ANNOT, va="bottom", ha="right")
 
     if label_top and "name" in table.columns and confident.any():
-        order = np.argsort(-(effect * (y + 1)) * confident)[:label_top]
-        for i in order:
-            if confident[i]:
-                ax.annotate(str(table["name"].iloc[i]), (effect[i], y[i]),
-                            xytext=(2, 2), textcoords="offset points",
-                            fontsize=FS_ANNOT, color=INK2)
+        order = [i for i in np.argsort(-(effect * (y + 1)) * confident)[:label_top] if confident[i]]
+        _stagger_labels(ax, [(effect[i], y[i], str(table["name"].iloc[i])) for i in order])
 
     ax.set_xlabel("effect size: fraction of state identity that moved", fontsize=FS_LABEL)
     ax.set_ylabel(ylabel, fontsize=FS_LABEL)
@@ -908,7 +979,7 @@ def plot_change_volcano(
     _title(ax, "Confident state changes",
            f"{n_conf} of {len(table)} regions clear both the replicate noise floor "
            f"and the false-discovery threshold")
-    leg = ax.legend(frameon=False, fontsize=FS_LEGEND, loc="upper left")
+    leg = ax.legend(frameon=False, fontsize=FS_LEGEND, loc="lower right")
     for t in leg.get_texts():
         t.set_color(INK2)
     fig.tight_layout()
@@ -1020,7 +1091,7 @@ def plot_expression_link(
     return fig
 
 
-def plot_gene_trace(trace: Dict[str, object], palette: str = "roadmap", figsize=(WIDTH_DOUBLE, 4.2)):
+def plot_gene_trace(trace: Dict[str, object], palette: str = DEFAULT_PALETTE, figsize=(WIDTH_DOUBLE, 4.2)):
     """One gene, end to end: signal, state composition per sample, and mark attribution.
 
     The traceability figure. Top panel is the normalised signal for every mark across the
@@ -1139,3 +1210,493 @@ def save_all(figs: Dict[str, plt.Figure], outdir: str) -> List[str]:
         plt.close(fig)
         paths.append(path)
     return paths
+
+
+# ---------------------------------------------------------------------------
+# Quantification summaries and condition comparison
+# ---------------------------------------------------------------------------
+
+
+def _label_colors(labels: Sequence[str], seg: Optional[Segmentation] = None,
+                  palette: str = DEFAULT_PALETTE, colors: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+    """Colour per label: explicit dict > segmentation colours > Roadmap mnemonic > CVD cycle."""
+    out: Dict[str, str] = dict(colors or {})
+    if seg is not None:
+        seg_colors = state_colors(seg, palette)
+        out.update({lbl: c for lbl, c in zip(seg.labels, seg_colors) if lbl not in out})
+    class_colors = (dict(SCIREP2025_GROUP_COLORS) if palette == "scirep2025" else
+                    {"active": "#D55E00", "poised": "#CC79A7", "repressed": "#0072B2",
+                     "background": "#E8E8E8"})
+    i = 0
+    for lbl in labels:
+        if lbl in out:
+            continue
+        base = str(lbl).split("_")[0]
+        table = {"roadmap": STATE_COLORS, "nature": STATE_COLORS_NATURE}.get(palette, STATE_COLORS_SCIREP2025)
+        if base in table:
+            out[lbl] = table[base]
+        elif str(lbl) in class_colors:
+            out[lbl] = class_colors[str(lbl)]
+        else:
+            out[lbl] = CVD_PALETTE[i % len(CVD_PALETTE)]
+            i += 1
+    return out
+
+
+def plot_state_percentages(
+    summary: pd.DataFrame,
+    seg: Optional[Segmentation] = None,
+    value: str = "pct_soft",
+    palette: str = DEFAULT_PALETTE,
+    figsize=(WIDTH_MID, 2.8),
+):
+    """Stacked bar of the percentage of the scored genome in each state, per sample or condition.
+
+    ``summary`` is :func:`chromstate.summary.state_summary` (per sample) or
+    :func:`chromstate.summary.condition_summary` (per condition). ``value`` picks the
+    column: ``pct_soft`` (posterior mass, the default) or ``pct_hard``.
+    """
+    key = "condition" if "condition" in summary.columns else "sample"
+    wide = summary.pivot(index=key, columns="state", values=value).fillna(0.0)
+    order = (summary.drop_duplicates("state").sort_values("state_index")["state"].tolist()
+             if "state_index" in summary.columns else list(wide.columns))
+    wide = wide[order]
+    colors = _label_colors(order, seg, palette)
+
+    fig, ax = _new_fig(*figsize)
+    bottom = np.zeros(len(wide))
+    x = np.arange(len(wide))
+    for lbl in order:
+        v = wide[lbl].to_numpy()
+        ax.bar(x, v, bottom=bottom, color=colors[lbl], edgecolor=SURFACE, linewidth=0.4,
+               width=0.7, label=full_state_name(lbl), zorder=3)
+        for xi, (b, h) in enumerate(zip(bottom, v)):
+            if h >= 6:
+                ax.text(xi, b + h / 2, f"{h:.0f}%", ha="center", va="center", fontsize=FS_CELL,
+                        color=INK)
+        bottom += v
+    ax.set_xticks(x)
+    ax.set_xticklabels(wide.index, rotation=0, fontsize=FS_TICK)
+    ax.set_ylabel("% of scored bases" if value.startswith("pct") else value, fontsize=FS_LABEL)
+    ax.set_ylim(0, max(bottom.max() * 1.02, 1))
+    _title(ax, "State composition by base pair",
+           "share of the scored genome in each state"
+           + (", from posterior mass" if value == "pct_soft" else ", from hard calls"))
+    leg = ax.legend(frameon=False, fontsize=FS_LEGEND, loc="upper left", bbox_to_anchor=(1.01, 1.0),
+                    handlelength=1.0)
+    for t in leg.get_texts():
+        t.set_color(INK2)
+    fig.tight_layout()
+    return fig
+
+
+def plot_state_strength(
+    summary: pd.DataFrame,
+    seg: Optional[Segmentation] = None,
+    palette: str = DEFAULT_PALETTE,
+    figsize=(WIDTH_MID, 2.6),
+):
+    """Strength of each state per sample or condition: mean log-fold intensity, with spread.
+
+    Zero is a typical instance of the state in the joint model; above zero the regions
+    in that state carry more of its defining marks than usual, below zero less. Error
+    bars are the replicate standard deviation when ``summary`` is per condition, else
+    the within-sample posterior-weighted spread.
+    """
+    if "strength" not in summary.columns:
+        raise ValueError("summary has no 'strength' column; run state_summary(include_strength=True)")
+    key = "condition" if "condition" in summary.columns else "sample"
+    groups = list(pd.unique(summary[key]))
+    order = (summary.drop_duplicates("state").sort_values("state_index")["state"].tolist()
+             if "state_index" in summary.columns else list(pd.unique(summary["state"])))
+    err_col = "strength_sd"
+    colors = _label_colors(order, seg, palette)
+
+    fig, ax = _new_fig(*figsize)
+    n = len(groups)
+    w = 0.8 / max(n, 1)
+    x = np.arange(len(order))
+    hatches = [None, "////", "....", "xxxx", "\\\\\\\\", "++++"]
+    for i, g in enumerate(groups):
+        sub = summary.loc[summary[key] == g].set_index("state").reindex(order)
+        vals = sub["strength"].to_numpy(dtype=float)
+        err = sub[err_col].to_numpy(dtype=float) if err_col in sub.columns else None
+        ax.bar(x - 0.4 + w * (i + 0.5), vals, w, color=[colors[s] for s in order],
+               edgecolor=INK, linewidth=0.4, hatch=hatches[i % len(hatches)], label=str(g),
+               yerr=None if err is None else np.nan_to_num(err), error_kw={"elinewidth": 0.5,
+               "capsize": 1.2, "ecolor": INK}, zorder=3)
+    ax.axhline(0, color=INK, linewidth=0.5)
+    ax.set_xticks(x)
+    ax.set_xticklabels(state_labels(order), rotation=45, ha="right", fontsize=FS_TICK)
+    ax.set_ylabel("state strength (log fold over typical)", fontsize=FS_LABEL)
+    _title(ax, "State strength",
+           "posterior-weighted mean intensity of each state; hatching distinguishes "
+           + ("conditions" if key == "condition" else "samples"))
+    handles = [Patch(facecolor=SURFACE, edgecolor=INK, hatch=hatches[i % len(hatches)], label=str(g))
+               for i, g in enumerate(groups)]
+    leg = ax.legend(handles=handles, frameon=False, fontsize=FS_LEGEND, loc="upper left",
+                    bbox_to_anchor=(1.01, 1.0))
+    for t in leg.get_texts():
+        t.set_color(INK2)
+    fig.tight_layout()
+    return fig
+
+
+def plot_condition_differences(
+    differences: pd.DataFrame,
+    seg: Optional[Segmentation] = None,
+    palette: str = DEFAULT_PALETTE,
+    figsize=(WIDTH_DOUBLE, 2.6),
+):
+    """Per state: change in genome share and in strength for every condition vs the reference.
+
+    ``differences`` is ``ConditionComparison.differences`` from
+    :func:`chromstate.summary.compare_conditions`.
+    """
+    conds = list(pd.unique(differences["condition"]))
+    ref = str(differences["reference"].iloc[0])
+    order = list(pd.unique(differences["state"]))
+    colors = _label_colors(order, seg, palette)
+    fig, axes = plt.subplots(1, 2, figsize=figsize, facecolor=SURFACE)
+    for ax, col, ylabel, title in (
+        (axes[0], "delta_pct_soft", "change in % of genome (percentage points)", "Amount"),
+        (axes[1], "delta_strength", "change in strength (log fold)", "Strength"),
+    ):
+        _style_axes(ax)
+        n = len(conds)
+        w = 0.8 / max(n, 1)
+        x = np.arange(len(order))
+        for i, c in enumerate(conds):
+            sub = differences.loc[differences["condition"] == c].set_index("state").reindex(order)
+            ax.bar(x - 0.4 + w * (i + 0.5), sub[col].to_numpy(dtype=float), w,
+                   color=[colors[s] for s in order], edgecolor=INK, linewidth=0.4,
+                   alpha=1.0 - 0.5 * i / max(n - 1, 1), zorder=3)
+            if n > 1:
+                for xi, v in zip(x, sub[col].to_numpy(dtype=float)):
+                    if np.isfinite(v):
+                        ax.text(xi - 0.4 + w * (i + 0.5), v, c, rotation=90, fontsize=FS_CELL - 0.5,
+                                ha="center", va="bottom" if v >= 0 else "top", color=INK)
+        ax.axhline(0, color=INK, linewidth=0.5)
+        ax.set_xticks(x)
+        ax.set_xticklabels(state_labels(order), rotation=45, ha="right", fontsize=FS_TICK)
+        ax.set_ylabel(ylabel, fontsize=FS_LABEL)
+        _title(ax, f"{title} versus {ref}", f"conditions: {', '.join(conds)}")
+    fig.tight_layout()
+    return fig
+
+
+def plot_alluvial(
+    flows: pd.DataFrame,
+    stages: Optional[Sequence[str]] = None,
+    weight: str = "weight",
+    colors: Optional[Dict[str, str]] = None,
+    seg: Optional[Segmentation] = None,
+    palette: str = DEFAULT_PALETTE,
+    order: Optional[Sequence[str]] = None,
+    min_fraction: float = 0.002,
+    gap: float = 0.015,
+    node_width: float = 0.08,
+    label_nodes: bool = True,
+    title: str = "State flow",
+    subtitle: Optional[str] = None,
+    unit: str = "",
+    figsize=(WIDTH_MID, 3.2),
+):
+    """Alluvial (multi-stage flow) plot from a long table of paths and weights.
+
+    ``flows`` has one column per stage (``stages``, in order) holding a categorical
+    label, plus a ``weight`` column (genes, or base pairs). Build it with
+    :func:`chromstate.patterns.flow_table`. Ribbons are coloured by their label at the
+    first stage; nodes are stacked in ``order`` (default: the order labels appear, which
+    for a segmentation follows the quiet-to-active state order). Paths below
+    ``min_fraction`` of the total are pooled into the node heights but not drawn, which
+    keeps a genome-wide plot from becoming a thousand hairlines.
+    """
+    from matplotlib.patches import PathPatch
+    from matplotlib.path import Path
+
+    stages = list(stages or flows.attrs.get("stages") or
+                  [c for c in flows.columns if c != weight])
+    if len(stages) < 2:
+        raise ValueError("an alluvial plot needs at least two stages")
+    tab = flows[stages + [weight]].copy()
+    tab[stages] = tab[stages].astype(str)
+    total = float(tab[weight].sum())
+    if total <= 0:
+        raise ValueError("flows carry no weight")
+
+    labels_seen: List[str] = []
+    if order is not None:
+        labels_seen = [str(o) for o in order]
+    if seg is not None:
+        labels_seen += [lbl for lbl in seg.labels if lbl not in labels_seen]
+    for s in stages:
+        for lbl in tab[s]:
+            if lbl not in labels_seen:
+                labels_seen.append(lbl)
+    colors = _label_colors(labels_seen, seg, palette, colors)
+
+    # node geometry: per stage, cumulative start of each label's block
+    n_stages = len(stages)
+    usable = 1.0 - gap * (len(labels_seen) - 1)
+    node_pos: List[Dict[str, Tuple[float, float]]] = []
+    for s in stages:
+        sizes = tab.groupby(s)[weight].sum()
+        present = [lbl for lbl in labels_seen if lbl in sizes.index and sizes[lbl] > 0]
+        y = 0.0
+        pos: Dict[str, Tuple[float, float]] = {}
+        for lbl in present:
+            h = usable * float(sizes[lbl]) / total
+            pos[lbl] = (y, h)
+            y += h + gap
+        node_pos.append(pos)
+
+    fig, ax = plt.subplots(figsize=figsize, facecolor=SURFACE)
+    ax.set_facecolor(SURFACE)
+    xs = np.linspace(0.0, 1.0, n_stages)
+
+    # ribbons between consecutive stages, stacked within each node in path order
+    tab = tab.sort_values([stages[0]] + stages[1:], key=lambda c: c.map({l: i for i, l in enumerate(labels_seen)}))
+    for i in range(n_stages - 1):
+        a, b = stages[i], stages[i + 1]
+        offs_a = {lbl: y for lbl, (y, _) in node_pos[i].items()}
+        offs_b = {lbl: y for lbl, (y, _) in node_pos[i + 1].items()}
+        pair = tab.groupby([a, b], sort=False)[weight].sum().reset_index()
+        pair["first"] = tab.groupby([a, b], sort=False)[stages[0]].first().to_numpy()
+        pair = pair.sort_values(
+            [a, b], key=lambda c: c.map({l: k for k, l in enumerate(labels_seen)}))
+        # left-side offsets follow the source order, right-side offsets the target order
+        left_cursor = dict(offs_a)
+        right_cursor = dict(offs_b)
+        ribbons = []
+        for _, r in pair.iterrows():
+            h = usable * float(r[weight]) / total
+            y0 = left_cursor[r[a]]
+            left_cursor[r[a]] += h
+            ribbons.append((r[a], r[b], h, y0, r["first"], float(r[weight])))
+        for src, dst, h, y0, first, wgt in sorted(ribbons, key=lambda t: (labels_seen.index(t[1]), labels_seen.index(t[0]))):
+            y1 = right_cursor[dst]
+            right_cursor[dst] += h
+            if wgt / total < min_fraction:
+                continue
+            x0, x1 = xs[i] + node_width / 2, xs[i + 1] - node_width / 2
+            xm = 0.5 * (x0 + x1)
+            verts = [(x0, y0), (xm, y0), (xm, y1), (x1, y1), (x1, y1 + h), (xm, y1 + h),
+                     (xm, y0 + h), (x0, y0 + h), (x0, y0)]
+            codes = [Path.MOVETO, Path.CURVE4, Path.CURVE4, Path.CURVE4, Path.LINETO,
+                     Path.CURVE4, Path.CURVE4, Path.CURVE4, Path.CLOSEPOLY]
+            ax.add_patch(PathPatch(Path(verts, codes), facecolor=colors[first],
+                                   edgecolor="none", alpha=0.55 if src == dst else 0.75, zorder=2))
+
+    for i, pos in enumerate(node_pos):
+        for lbl, (y, h) in pos.items():
+            ax.add_patch(plt.Rectangle((xs[i] - node_width / 2, y), node_width, h,
+                                       facecolor=colors[lbl], edgecolor=INK, linewidth=0.4, zorder=3))
+            if label_nodes and h >= 0.03:
+                share = 100.0 * h / usable
+                txt = f"{full_state_name(lbl)}\n{share:.0f}%{unit}"
+                ha = "right" if i == 0 else ("left" if i == n_stages - 1 else "center")
+                x = xs[i] - node_width / 2 - 0.01 if i == 0 else (
+                    xs[i] + node_width / 2 + 0.01 if i == n_stages - 1 else xs[i])
+                ax.text(x, y + h / 2, txt, ha=ha, va="center", fontsize=FS_CELL, color=INK,
+                        zorder=4, bbox=None if i in (0, n_stages - 1) else
+                        dict(boxstyle="round,pad=0.15", facecolor=SURFACE, edgecolor="none", alpha=0.8))
+    for i, s in enumerate(stages):
+        ax.text(xs[i], 1.0 + gap, s, ha="center", va="bottom", fontsize=FS_LABEL, color=INK)
+    ax.set_xlim(-0.35, 1.35)
+    ax.set_ylim(-0.01, 1.0 + 3 * gap + 0.02)
+    ax.axis("off")
+    _title(ax, title, subtitle)
+    fig.tight_layout()
+    return fig
+
+
+def plot_region_alluvial(seg: Segmentation, groups: Dict[str, Sequence[str]],
+                         by: str = "dom", palette: str = DEFAULT_PALETTE, **kwargs):
+    """Alluvial of base pairs moving between states across conditions."""
+    from .patterns import default_state_classes, flow_table, region_patterns
+
+    classes = default_state_classes(seg) if by == "class" else None
+    pat = region_patterns(seg, groups, state_classes=classes)
+    flows = flow_table(pat, by=by)
+    kwargs.setdefault("title", "Regional state flow")
+    kwargs.setdefault("subtitle", "each ribbon is the base pairs whose dominant state follows that path")
+    return plot_alluvial(flows, seg=seg, palette=palette, **kwargs)
+
+
+def plot_gene_alluvial(dom: pd.DataFrame, seg: Optional[Segmentation] = None,
+                       by: str = "dom", palette: str = DEFAULT_PALETTE, **kwargs):
+    """Alluvial of genes moving between dominant promoter (or enhancer) states."""
+    from .patterns import flow_table
+
+    flows = flow_table(dom, by=by, weight=None)
+    kwargs.setdefault("title", "Gene state flow")
+    kwargs.setdefault("subtitle", f"{len(dom):,} genes by dominant state of the "
+                      f"{ {'P': 'promoter', 'E': 'distal space', 'B': 'gene body'}.get(dom.attrs.get('part'), 'region')}")
+    kwargs.setdefault("min_fraction", 0.005)
+    return plot_alluvial(flows, seg=seg, palette=palette, **kwargs)
+
+
+def plot_pattern_counts(counts: pd.DataFrame, by: str = "pattern", top: int = 20,
+                        figsize=(WIDTH_SINGLE, 2.8)):
+    """Horizontal bars of the most common gene state patterns or categories."""
+    sub = counts.head(top).iloc[::-1]
+    fig, ax = _new_fig(*figsize)
+    ax.barh(np.arange(len(sub)), sub["n_genes"], color="#2a78d6", edgecolor=SURFACE, zorder=3)
+    ax.set_yticks(np.arange(len(sub)))
+    ax.set_yticklabels([" > ".join(full_state_name(p) for p in str(v).split(">")) if by == "pattern" else str(v)
+                        for v in sub[by]], fontsize=FS_TICK)
+    ax.set_xlabel("genes", fontsize=FS_LABEL)
+    _title(ax, f"Gene {by}s", f"top {len(sub)} of {len(counts)}")
+    fig.tight_layout()
+    return fig
+
+
+def plot_enhancer_contributions(
+    importance: pd.DataFrame, gene: str, sample: Optional[str] = None,
+    figsize=(WIDTH_SINGLE, 2.2),
+):
+    """One gene's enhancers along the regulatory window, bar height = importance."""
+    sub = importance.loc[(importance["gene_id"] == gene) | (importance["name"] == gene)]
+    if sample is not None:
+        sub = sub.loc[sub["sample"] == sample]
+    if sub.empty:
+        raise ValueError(f"no enhancer rows for {gene!r}")
+    fig, ax = _new_fig(*figsize)
+    x = sub["signed_distance"].to_numpy(dtype=float) / 1e3
+    y = sub["importance"].to_numpy(dtype=float)
+    ax.bar(x, y, width=max(1.0, (x.max() - x.min()) / 60) if len(x) > 1 else 1.0,
+           color=np.where(y >= 0, "#e34948", "#2a78d6"), edgecolor=INK, linewidth=0.3, zorder=3)
+    ax.axvline(0, color=INK, linewidth=0.5, linestyle=":")
+    ax.axhline(0, color=INK, linewidth=0.5)
+    ax.set_xlabel("distance from TSS (kb, negative = upstream)", fontsize=FS_LABEL)
+    ax.set_ylabel("importance (predicted expression lost)", fontsize=FS_LABEL)
+    name = str(sub["name"].iloc[0])
+    _title(ax, f"Enhancers of {name}", "in-silico deletion through the promoter + enhancer model"
+           + (f", {sample}" if sample else ""))
+    fig.tight_layout()
+    return fig
+
+
+# ---------------------------------------------------------------------------
+# Statistical tests and expression ranking
+# ---------------------------------------------------------------------------
+
+
+def _stars(q: float) -> str:
+    if not np.isfinite(q):
+        return ""
+    return "***" if q < 0.001 else "**" if q < 0.01 else "*" if q < 0.05 else "n.s."
+
+
+def plot_state_tests(
+    tests: pd.DataFrame,
+    seg: Optional[Segmentation] = None,
+    palette: str = DEFAULT_PALETTE,
+    figsize=(WIDTH_MID, 2.8),
+):
+    """Per state: change in genome share with its block-bootstrap 95% interval and
+    significance stars from the replicate t-test (``q_rep``; ``q_block`` in brackets
+    when no replicate test was possible).
+
+    ``tests`` is :func:`chromstate.summary.state_tests` output.
+    """
+    conds = list(pd.unique(tests["condition"]))
+    ref = str(tests["reference"].iloc[0])
+    order = list(pd.unique(tests["state"]))
+    colors = _label_colors(order, seg, palette)
+    fig, ax = _new_fig(*figsize)
+    n = len(conds)
+    w = 0.8 / max(n, 1)
+    x = np.arange(len(order))
+    for i, c in enumerate(conds):
+        sub = tests.loc[tests["condition"] == c].set_index("state").reindex(order)
+        xi = x - 0.4 + w * (i + 0.5)
+        d = sub["delta_pct"].to_numpy(dtype=float)
+        lo = d - sub["delta_lo"].to_numpy(dtype=float)
+        hi = sub["delta_hi"].to_numpy(dtype=float) - d
+        ax.bar(xi, d, w, color=[colors[s] for s in order], edgecolor=INK, linewidth=0.4,
+               alpha=1.0 - 0.45 * i / max(n - 1, 1), zorder=3)
+        ax.errorbar(xi, d, yerr=np.vstack([np.clip(lo, 0, None), np.clip(hi, 0, None)]), fmt="none",
+                    ecolor=INK, elinewidth=0.5, capsize=1.5, zorder=4)
+        for xx, dd, qr, qb, h in zip(xi, d, sub["q_rep"], sub["q_block"], sub["delta_hi"]):
+            star = _stars(qr) if np.isfinite(qr) else f"[{_stars(qb)}]"
+            y = h if dd >= 0 else sub.loc[sub.index[list(xi).index(xx)], "delta_lo"]
+            ax.text(xx, y, star, ha="center", va="bottom" if dd >= 0 else "top", fontsize=FS_CELL, color=INK)
+    ax.axhline(0, color=INK, linewidth=0.5)
+    ax.set_xticks(x)
+    ax.set_xticklabels(state_labels(order), rotation=45, ha="right", fontsize=FS_TICK)
+    ax.set_ylabel("change in % of genome (percentage points)", fontsize=FS_LABEL)
+    _title(ax, f"State share versus {ref}",
+           "bars = difference, whiskers = 95% block-bootstrap interval, stars = replicate "
+           "t-test FDR (brackets: block bootstrap when replicates are missing)"
+           + (f"; shading: {', '.join(conds)}" if n > 1 else ""))
+    fig.tight_layout()
+    return fig
+
+
+def plot_state_importance(
+    table: pd.DataFrame,
+    seg: Optional[Segmentation] = None,
+    palette: str = DEFAULT_PALETTE,
+    title: str = "Which states explain expression",
+    figsize=(WIDTH_SINGLE, 2.8),
+):
+    """Unique held-out R² per state with its bootstrap interval, coloured by state and
+    annotated with the direction of association (``+`` higher expression).
+
+    ``table`` is ``StateImportance.table`` from
+    :func:`chromstate.regulation.state_importance` (sorted by ``unique_r2``).
+    """
+    tab = table.sort_values("unique_r2").reset_index(drop=True)
+    order = tab["state"].tolist()
+    colors = _label_colors(order, seg, palette)
+    fig, ax = _new_fig(*figsize)
+    ax.grid(False)
+    ax.grid(True, axis="x", color=GRID, linewidth=0.3, zorder=0)
+    y = np.arange(len(tab))
+    v = tab["unique_r2"].to_numpy(dtype=float)
+    lo = v - tab["unique_lo"].to_numpy(dtype=float)
+    hi = tab["unique_hi"].to_numpy(dtype=float) - v
+    ax.barh(y, v, color=[colors[s] for s in order], edgecolor=INK, linewidth=0.4, zorder=3)
+    ax.errorbar(v, y, xerr=np.vstack([np.clip(lo, 0, None), np.clip(hi, 0, None)]), fmt="none",
+                ecolor=INK, elinewidth=0.5, capsize=1.5, zorder=4)
+    for yy, vv, d, rho in zip(y, v, tab["direction"], tab["marginal_rho"]):
+        ax.text(max(vv, 0) + 0.005, yy, f"{'+' if d >= 0 else '−'}  ρ={rho:.2f}", va="center",
+                ha="left", fontsize=FS_CELL, color=INK)
+    ax.axvline(0, color=INK, linewidth=0.5)
+    ax.set_yticks(y)
+    ax.set_yticklabels(state_labels(order), fontsize=FS_TICK)
+    ax.set_xlabel("unique held-out R² (lost when the state is permuted)", fontsize=FS_LABEL)
+    _title(ax, title, "sign = direction of association; ρ = single-state held-out Spearman")
+    fig.tight_layout()
+    return fig
+
+
+def plot_part_ranking(parts: pd.DataFrame, figsize=(WIDTH_SINGLE, 2.4)):
+    """Held-out Spearman ρ (with 95% bootstrap interval) for each combination of gene parts.
+
+    ``parts`` is :func:`chromstate.regions.rank_parts_for_expression` output. Reading
+    ``P+E`` against ``P`` answers whether the distal enhancer space adds anything the
+    promoter does not already carry.
+    """
+    tab = parts.sort_values("spearman").reset_index(drop=True)
+    fig, ax = _new_fig(*figsize)
+    ax.grid(False)
+    ax.grid(True, axis="x", color=GRID, linewidth=0.3, zorder=0)
+    y = np.arange(len(tab))
+    v = tab["spearman"].to_numpy(dtype=float)
+    lo = v - tab["rho_lo"].to_numpy(dtype=float)
+    hi = tab["rho_hi"].to_numpy(dtype=float) - v
+    names = {"P": "promoter", "E": "enhancer space", "B": "gene body"}
+    labels = [" + ".join(names.get(p, p) for p in str(s).split("+")) for s in tab["parts"]]
+    col = ["#AE231B" if "E" in str(s).split("+") else "#395493" for s in tab["parts"]]
+    ax.barh(y, v, color=col, edgecolor=INK, linewidth=0.4, zorder=3)
+    ax.errorbar(v, y, xerr=np.vstack([np.clip(lo, 0, None), np.clip(hi, 0, None)]), fmt="none",
+                ecolor=INK, elinewidth=0.5, capsize=1.5, zorder=4)
+    ax.set_yticks(y)
+    ax.set_yticklabels(labels, fontsize=FS_TICK)
+    ax.set_xlabel("held-out Spearman ρ with expression", fontsize=FS_LABEL)
+    _title(ax, "Gene parts and expression", "red = includes the enhancer space; whiskers = 95% bootstrap over genes")
+    fig.tight_layout()
+    return fig

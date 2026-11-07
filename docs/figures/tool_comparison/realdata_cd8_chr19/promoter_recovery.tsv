@@ -1,0 +1,7 @@
+tool	method	tss_auprc	tss_baseline	active_tss_auprc	active_tss_baseline	active_tss_auprc_Arm	active_tss_auprc_Cl13	active_tss_auprc_Naive
+chromstate	ChromState	0.20542	0.021881	0.23823	0.0071295	0.2173	0.25349	0.24389
+chromhmm	ChromHMM	0.17104	0.021881	0.18869	0.0071295	0.17376	0.19509	0.19722
+epicseg	EpiCSeg	0.23336	0.021881	0.25106	0.0071295	0.23745	0.26748	0.24825
+normr	normR	0.1431	0.021881	0.14297	0.0071295	0.13273	0.16152	0.13468
+dihmm	diHMM	0.16074	0.021883	0.18257	0.0071299	0.16886	0.18864	0.19021
+segway	Segway	0.1491	0.021881	0.16806	0.0071295	0.15827	0.18688	0.15902

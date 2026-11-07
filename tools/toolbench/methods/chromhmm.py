@@ -26,6 +26,7 @@ input file"); set ``CHROMHMM_PROCESSORS`` to cap it.
 
 from __future__ import annotations
 
+import glob
 import os
 import re
 import shlex
@@ -106,6 +107,8 @@ class ChromHMMAdapter(ToolAdapter):
         ]
         if os.environ.get("CHROMHMM_PROCESSORS"):
             argv += ["-p", os.environ["CHROMHMM_PROCESSORS"]]
+        if os.environ.get("CHROMHMM_INIT"):
+            argv += ["-init", os.environ["CHROMHMM_INIT"]]
         return argv + [indir, outdir, str(n_states),
                        os.environ.get("CHROMHMM_ASSEMBLY", "hg19")]
 
@@ -126,6 +129,16 @@ class ChromHMMAdapter(ToolAdapter):
         argv = self._argv(ds, n_states, seed, workdir)
         res = run_command(argv, cwd=workdir, timeout_s=timeout_s,
                           log_path=os.path.join(workdir, "chromhmm.log"))
+        if res.returncode != 0 and "initialization strategy can only support" in res.stderr \
+                and not os.environ.get("CHROMHMM_INIT"):
+            # ChromHMM's default INFORMATION initialisation seeds states from distinct
+            # presence patterns, so with few marks it cannot start more states than the
+            # data has patterns (14 here for 4 marks). Its own advice is RANDOM init.
+            # options must precede the four positionals (indir outdir K assembly)
+            argv = argv[:-4] + ["-init", "random"] + argv[-4:]
+            res = run_command(argv, cwd=workdir, timeout_s=max(timeout_s - res.runtime_s, 1.0),
+                              log_path=os.path.join(workdir, "chromhmm.log"))
+            self._init_note = "-init random (INFORMATION init supports fewer states than asked)"
         if res.returncode != 0:
             return self.failed(
                 f"LearnModel exited {res.returncode}"
@@ -138,8 +151,13 @@ class ChromHMMAdapter(ToolAdapter):
         vocab: List[str] = [f"E{k + 1}" for k in range(n_states)]
         states = np.full(ds.n_rows, -1, dtype=np.int64)
         found = 0
+        # With -init random ChromHMM appends the seed to every output id
+        # (model_15_0.txt, Arm_15_0_segments.bed); the default init writes model_15.txt.
+        run_id = str(n_states)
+        for cand in sorted(glob.glob(os.path.join(outdir, f"model_{n_states}*.txt"))):
+            run_id = os.path.basename(cand)[len("model_"):-len(".txt")]
         for sample in ds.samples:
-            bed = os.path.join(outdir, f"{sample}_{n_states}_segments.bed")
+            bed = os.path.join(outdir, f"{sample}_{run_id}_segments.bed")
             if not os.path.exists(bed):
                 continue
             found += 1
@@ -153,7 +171,7 @@ class ChromHMMAdapter(ToolAdapter):
                 command=res.command, workdir=workdir, runtime_s=res.runtime_s,
             )
 
-        posterior = read_posterior(ds, outdir, n_states)
+        posterior = read_posterior(ds, outdir, n_states, run_id)
         biv, act = posthoc_scores(ds, states, posterior, n_states)
         return ToolRun(
             tool=self.key,
@@ -171,11 +189,12 @@ class ChromHMMAdapter(ToolAdapter):
             workdir=workdir,
             verified=self.verified,
             notes=(f"segments read for {found}/{len(ds.samples)} samples; bivalency and "
-                   "activity scored post hoc from the posterior (toolbench.scores)"),
+                   "activity scored post hoc from the posterior (toolbench.scores)"
+                   + (f"; {self._init_note}" if getattr(self, "_init_note", "") else "")),
         )
 
 
-def read_posterior(ds, outdir: str, n_states: int) -> Optional[np.ndarray]:
+def read_posterior(ds, outdir: str, n_states: int, run_id: Optional[str] = None) -> Optional[np.ndarray]:
     """Assemble ``POSTERIOR/*_posterior.txt`` into one array, or None if absent.
 
     ChromHMM writes one file per (sample, chromosome) with two header lines. Anything
@@ -189,7 +208,7 @@ def read_posterior(ds, outdir: str, n_states: int) -> Optional[np.ndarray]:
     bins = ds.bins.reset_index(drop=True)
     for sample in ds.samples:
         for chrom in bins.loc[bins["sample"] == sample, "chrom"].unique():
-            path = os.path.join(post_dir, f"{sample}_{n_states}_{chrom}_posterior.txt")
+            path = os.path.join(post_dir, f"{sample}_{run_id or n_states}_{chrom}_posterior.txt")
             if not os.path.exists(path):
                 return None
             block = np.loadtxt(path, skiprows=2, ndmin=2)

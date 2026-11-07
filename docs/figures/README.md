@@ -40,3 +40,22 @@ See the [application tutorial](../tutorials/02_cd8_tcell_application.md) and
 - [Fig7_tracks_Tox](scireports2025/Fig7_tracks_Tox.pdf)
 - [Fig8_poised_genes](scireports2025/Fig8_poised_genes.pdf)
 - [Fig9_chromatin_programs](scireports2025/Fig9_chromatin_programs.pdf)
+
+## Expression prediction (Tutorial 3)
+
+`expression_prediction/` holds the `chromstate predict` figures from the CD8 T-cell run on
+chr17-19 (`k12_level_*`: unsupervised 12-state fit, expression level; `k12_change_*` and
+`defs_change_*`: Cl13-vs-Naive change for the unsupervised and the defined-state fit).
+`state_importance` = unique held-out R² per state; `representations` = quantitative vs
+occupancy vs hard labels vs raw signal; `predicted_vs_observed` = held-out predictions;
+`part_ranking` = promoter vs body. See [docs/tutorials/03_expression_prediction.md](../tutorials/03_expression_prediction.md).
+
+## Statistical figures of the differential report
+
+`statistics/` holds the output of `tools/make_stats_figures.py` (`sbatch/diag.sbatch`)
+on a simulated three-condition experiment with three replicates each (ReprPC -> TssA in
+half of the Polycomb bins of the two treated conditions): `volcano_*` (omnibus per
+region, with the region-level noise floor), `state_volcano_*` (per state),
+`region_state_heatmap_*`, `state_gain_loss`, `pvalue_calibration_*` (observed vs
+label-permuted), `replicate_concordance_*`, `change_ecdf`, `anova_volcano`, and the
+benchmark `perturbation_pr_curves` (nine tools on the simulated perturbation).

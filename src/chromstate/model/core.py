@@ -149,6 +149,8 @@ def fit(
     fit_fraction: Optional[float] = None,
     block_bins: int = 2_500,
     n_jobs: Optional[int] = None,
+    definitions=None,
+    anchor: str = "seed",
 ) -> Segmentation:
     """Fit a ChromState model to a dataset.
 
@@ -191,8 +193,23 @@ def fit(
     n_jobs
         Threads for the per-chain forward-backward and Viterbi recursions. Defaults to
         ``CHROMSTATE_THREADS`` or up to 8 cores; results do not depend on it.
+    definitions, anchor
+        A :class:`chromstate.definitions.StateDefinitions` table (states x marks, ``+``,
+        ``-`` or free) fixes the vocabulary: the defined states seed the emissions and
+        keep their names. ``anchor="seed"`` lets EM move the means; ``anchor="fixed"``
+        pins every ``+``/``-`` entry at its seeded level so the measured quantity is
+        exactly the stated pattern. ``n_states`` may exceed the table; the extra states
+        are learned and named automatically. Requires the negative-binomial emission.
     """
     emission = _resolve_emission(emission, ds)
+    if definitions is not None:
+        if emission != "nb":
+            raise ValueError("state definitions are implemented for the negative-binomial emission only")
+        if anchor not in ("seed", "fixed"):
+            raise ValueError(f"anchor must be 'seed' or 'fixed', got {anchor!r}")
+        definitions = definitions.restrict(ds.marks)
+        if n_states < len(definitions):
+            n_states = len(definitions)
     if emission == "nb" and not ds.is_count:
         raise ValueError(
             "emission='nb' requires count input (BAM or BED reads). This dataset was "
@@ -218,7 +235,14 @@ def fit(
     limit = max(n_restarts, max_restarts) if adaptive_restarts else n_restarts
     for r in range(limit):
         rng = np.random.default_rng(seed + r)
-        em: Emissions = build_emissions(emission, X, offsets, n_states, rng)
+        if definitions is not None:
+            from ..definitions import seed_from_definitions
+
+            em, _ = seed_from_definitions(X, offsets, definitions, n_states, rng,
+                                          jitter=0.0 if r == 0 else 0.15)
+            em.active = anchor == "fixed"
+        else:
+            em: Emissions = build_emissions(emission, X, offsets, n_states, rng)
         hmm = HMM(n_states, em, self_transition_prior=self_transition_prior, n_jobs=n_jobs)
         if verbose:
             print(f"restart {r + 1}")
@@ -255,7 +279,7 @@ def fit(
                                             occupancy=posterior.mean(axis=0))
     collapse = _collapse_diagnostic(hmm, states, n_states)
 
-    return Segmentation(
+    seg = Segmentation(
         posterior=posterior,
         states=states,
         labels=labels,
@@ -277,6 +301,12 @@ def fit(
             **collapse,
         },
     )
+    if definitions is not None:
+        from ..definitions import apply_definitions_labels
+
+        apply_definitions_labels(seg, definitions)
+        seg.meta["anchor"] = anchor
+    return seg
 
 
 def training_blocks(

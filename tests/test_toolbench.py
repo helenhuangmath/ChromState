@@ -287,3 +287,83 @@ def test_count_matrix_round_trips_through_the_cli_loader(small, tmp_path):
     assert back.marks == ds.marks
     np.testing.assert_allclose(np.sort(back.X, axis=0), np.sort(ds.X, axis=0))
     assert sum(sl.stop - sl.start for sl in back.chains) == back.n_rows
+
+
+# -- real-data evaluation (toolbench.realdata) --------------------------------
+
+
+def _toy_features(ds):
+    import pandas as pd
+
+    rows = []
+    bins = ds.bins.loc[ds.sample_mask(ds.samples[0])]
+    for chrom, grp in bins.groupby("chrom"):
+        starts = grp["start"].to_numpy()
+        for i, s in enumerate(starts[20:-20:40]):
+            rows.append({"gene_id": f"{chrom}_g{i}", "name": f"{chrom}_g{i}", "chrom": chrom,
+                         "start": int(s), "end": int(s) + 3000, "strand": "+" if i % 2 else "-"})
+    return cs.FeatureSet(pd.DataFrame(rows))
+
+
+def test_realdata_runs_round_trip_and_figures(small, tmp_path):
+    import pandas as pd
+
+    from toolbench.realdata import (
+        expression_prediction,
+        load_runs,
+        promoter_composition,
+        promoter_recovery,
+        save_runs,
+        state_strengths,
+        write_realdata_report,
+    )
+
+    ds, truth = small
+    runs = run_tools(ds, ["chromstate", "kmeans"], n_states=truth.n_states, seed=0)
+    save_runs(runs, str(tmp_path / "runs"))
+    back = load_runs(str(tmp_path / "runs"))
+    assert [r.tool for r in back] == ["chromstate", "kmeans"]
+    assert np.array_equal(back[0].states, runs[0].states)
+    assert back[0].posterior is not None and back[0].posterior.shape == runs[0].posterior.shape
+
+    f = _toy_features(ds)
+    comp = promoter_composition(ds, back[0], f, flank=1000)
+    scols = [c for c in comp.columns if c not in ("gene_id", "sample")]
+    assert len(scols) == truth.n_states
+    assert np.allclose(comp[scols].sum(axis=1), 1.0, atol=1e-6)
+    assert set(comp["sample"]) == set(ds.samples)
+
+    st = state_strengths(ds, back[0])
+    assert set(st["class"]) <= {"active", "bivalent", "polycomb", "heterochromatin", "weak", "quiescent"}
+
+    rng = np.random.default_rng(0)
+    expr = pd.DataFrame({s: rng.normal(size=len(f)) for s in ds.samples}, index=f.table["gene_id"])
+    rec = promoter_recovery(ds, back, f, expr, flank=1000, block_bp=20_000)
+    assert {"tss_auprc", "active_tss_auprc"} <= set(rec.columns) and len(rec) == 2
+    pred = expression_prediction(ds, back, f, expr, flank=1000, block_bp=20_000)
+    assert {"level_rho", "change_rho"} <= set(pred.columns)
+    assert pred["method"].iloc[-1].startswith("Raw mark")
+
+    chrom = ds.bins["chrom"].iloc[0]
+    written = write_realdata_report(str(tmp_path / "rd"), ds, back, f, expr, 1000,
+                                    [(chrom, 0, 20_000, "toy")], "chromstate", None, None, "toy", 0)
+    names = {os.path.basename(p) for p in written}
+    for need in ("state_profiles.pdf", "state_class_fractions.pdf", "segment_lengths.pdf",
+                 "state_overlap.pdf", "promoter_recovery.pdf", "expression_prediction.pdf",
+                 "locus_toy.pdf", "REPORT.md", "expression_prediction.tsv"):
+        assert need in names, need
+
+
+def test_segway_adapter_is_registered_and_skips_cleanly(small, monkeypatch):
+    from toolbench.methods.segway import SegwayAdapter
+
+    monkeypatch.delenv("SEGWAY_ENV", raising=False)
+    monkeypatch.setenv("PATH", "/nonexistent")
+    ad = SegwayAdapter()
+    assert "segway" in registry()
+    assert not ad.availability().available
+    ds, truth = small
+    run = ad.run(ds, n_states=truth.n_states, seed=0, workdir="/nonexistent/x", timeout_s=1)
+    assert run.status == "skipped"
+    cmd = ad.dry_run_command(ds, 5, 0, "/w")
+    assert "genomedata-load" in cmd and "segway train" in cmd and "--num-labels=5" in cmd

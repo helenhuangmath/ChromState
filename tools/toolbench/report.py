@@ -270,3 +270,83 @@ def write_report(
         fh.write("\n".join(lines))
     written.append(path)
     return written
+
+
+
+def perturbation_scores(run, ds, truth):
+    """Per-bin change score and responder labels for one run (same rule as the metric)."""
+    import numpy as np
+
+    from .core import UNASSIGNED
+
+    treated = list(getattr(truth, "treated", []) or [])
+    samples = list(ds.samples)
+    controls = [s for s in samples if s not in treated]
+    masks = {s: ds.sample_mask(s) for s in samples}
+    if run.posterior is not None:
+        pa = np.mean([run.posterior[masks[s]] for s in controls], axis=0)
+        pb = np.mean([run.posterior[masks[s]] for s in treated], axis=0)
+        score = 0.5 * np.abs(pa - pb).sum(axis=1)
+    else:
+        sa = np.stack([run.states[masks[s]] for s in controls])
+        sb = np.stack([run.states[masks[s]] for s in treated])
+        score = (sa[:, None, :] != sb[None, :, :]).mean(axis=(0, 1))
+    ok = np.ones(len(score), dtype=bool)
+    for s in samples:
+        ok &= run.states[masks[s]] != UNASSIGNED
+    y = np.asarray(truth.responder_mask)[masks[controls[0]]]
+    return score[ok], y[ok]
+
+
+def plot_perturbation_curves(runs, ds, truth, figsize=None):
+    """Precision-recall (left) and ROC (right) for detecting the simulated responders
+    from each tool's control-versus-treated change. Tools without posteriors give a
+    single operating point, drawn as a marker."""
+    import matplotlib.pyplot as plt
+    import numpy as np
+    from sklearn.metrics import average_precision_score, precision_recall_curve, roc_auc_score, roc_curve
+
+    from chromstate import viz
+
+    figsize = figsize or (viz.WIDTH_DOUBLE, viz.WIDTH_SINGLE * 0.95)
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=figsize, facecolor=viz.SURFACE)
+    cmap = plt.get_cmap("tab10")
+    base = None
+    for i, run in enumerate([r for r in runs if r.ok and r.states is not None]):
+        try:
+            score, y = perturbation_scores(run, ds, truth)
+        except Exception:
+            continue
+        if y.sum() == 0:
+            continue
+        base = float(y.mean())
+        ap = average_precision_score(y, score)
+        auc = roc_auc_score(y, score)
+        label = f"{run.tool} (AUPRC {ap:.2f}, AUROC {auc:.2f})"
+        if run.posterior is not None:
+            p, r, _ = precision_recall_curve(y, score)
+            ax1.step(r, p, where="post", color=cmap(i % 10), linewidth=0.9, label=label, zorder=3)
+            fpr, tpr, _ = roc_curve(y, score)
+            ax2.plot(fpr, tpr, color=cmap(i % 10), linewidth=0.9, zorder=3)
+        else:
+            called = score > 0.5
+            tp = float((called & (y > 0)).sum())
+            prec = tp / max(called.sum(), 1)
+            rec = tp / max(y.sum(), 1)
+            ax1.scatter([rec], [prec], color=cmap(i % 10), s=18, marker="D", zorder=4, label=label + " · hard call")
+            fpr = float((called & (y == 0)).sum() / max((y == 0).sum(), 1))
+            ax2.scatter([fpr], [rec], color=cmap(i % 10), s=18, marker="D", zorder=4)
+    if base is not None:
+        ax1.axhline(base, color=viz.INK, linewidth=0.5, linestyle="--")
+        ax1.text(0.99, base + 0.01, f"random {base:.3f}", ha="right", fontsize=viz.FS_CELL)
+    ax2.plot([0, 1], [0, 1], color=viz.INK, linewidth=0.5, linestyle="--")
+    for ax, xl, yl, t in [(ax1, "recall", "precision", "Precision-recall"), (ax2, "false positive rate", "true positive rate", "ROC")]:
+        viz._style_axes(ax, grid_axis="both")
+        ax.set_xlabel(xl, fontsize=viz.FS_LABEL)
+        ax.set_ylabel(yl, fontsize=viz.FS_LABEL)
+        ax.set_xlim(0, 1)
+        ax.set_ylim(0, 1.02)
+        viz._title(ax, t, "detecting the bins the simulated perturbation moved")
+    ax1.legend(fontsize=viz.FS_CELL, frameon=False, loc="upper right")
+    fig.tight_layout()
+    return fig

@@ -369,3 +369,63 @@ def top_regions(
     if by not in sub.columns:
         raise ValueError(f"Column {by!r} not in table; available: {list(sub.columns)}")
     return sub.nlargest(n, by).reset_index(drop=True)
+
+
+def quantify_regions(
+    seg: Segmentation,
+    regions: pd.DataFrame,
+    samples: Optional[Sequence[str]] = None,
+    min_bins: int = 1,
+) -> pd.DataFrame:
+    """State composition of arbitrary regions (a BED table), per sample.
+
+    One row per (region, sample): ``occ_<state>`` (mean posterior over the region's
+    bins; the fraction of the region in each state), ``bp_<state>`` (the same in base
+    pairs), ``dominant`` (the state with the largest share), ``dominant_share``,
+    ``entropy`` (normalised, of the region's mean composition) and ``n_bins``. Regions
+    are matched to bins by coordinate; a region covering fewer than ``min_bins`` bins is
+    dropped. This is the "quantify these states in these regions" call: promoters, peaks,
+    enhancer sets or any BED file the user supplies.
+    """
+    from .dynamics import _region_membership
+
+    ds = seg.dataset
+    samples = list(samples or ds.samples)
+    regions = regions.reset_index(drop=True)
+    for col in ("chrom", "start", "end"):
+        if col not in regions.columns:
+            raise ValueError(f"regions needs a {col!r} column; got {list(regions.columns)}")
+    if "name" not in regions.columns:
+        regions = regions.assign(name=[f"{c}:{s}-{e}" for c, s, e in
+                                       zip(regions["chrom"], regions["start"], regions["end"])])
+    frames = []
+    K = seg.n_states
+    for s in samples:
+        m = ds.sample_mask(s)
+        bins = ds.bins.loc[m, ["chrom", "start", "end"]].reset_index(drop=True)
+        post = seg.posterior[m]
+        width = (bins["end"] - bins["start"]).to_numpy(dtype=float)
+        members = _region_membership(bins, regions)
+        rows = []
+        for i, idx in enumerate(members):
+            if len(idx) < min_bins:
+                continue
+            w = width[idx]
+            comp = (w[:, None] * post[idx]).sum(axis=0) / max(w.sum(), 1e-12)
+            bp = comp * w.sum()
+            p = np.clip(comp, 1e-12, 1.0)
+            ent = float(-(p * np.log(p)).sum() / np.log(K)) if K > 1 else 0.0
+            top = int(np.argmax(comp))
+            row = {"name": regions.at[i, "name"], "chrom": regions.at[i, "chrom"],
+                   "start": int(regions.at[i, "start"]), "end": int(regions.at[i, "end"]),
+                   "sample": s, "n_bins": int(len(idx)),
+                   "dominant": seg.labels[top], "dominant_share": float(comp[top]), "entropy": ent}
+            for k, lbl in enumerate(seg.labels):
+                row[f"occ_{lbl}"] = float(comp[k])
+            for k, lbl in enumerate(seg.labels):
+                row[f"bp_{lbl}"] = float(bp[k])
+            rows.append(row)
+        frames.append(pd.DataFrame(rows))
+    out = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+    out.attrs["states"] = list(seg.labels)
+    return out

@@ -49,11 +49,19 @@ ARMA_FLAGS="-DARMA_NO_DEBUG"
 if [ "${DIHMM_BOUNDS_CHECK:-0}" = "1" ]; then ARMA_FLAGS=""; fi
 PYINC="$("$ENV/bin/python" -c 'import sysconfig; print(sysconfig.get_paths()["include"])')"
 NPINC="$("$ENV/bin/python" -c 'import numpy; print(numpy.get_include())')"
-"$ENV/bin/clang++" -std=c++14 -O3 -fPIC -shared -undefined dynamic_lookup \
+# macOS: the env's clang++ with lazy symbol lookup; Linux: the env's conda g++ (or system g++).
+if [ "$(uname)" = "Darwin" ]; then
+  CXX="$ENV/bin/clang++"; LINKFLAGS="-undefined dynamic_lookup"
+else
+  CXX="$(ls "$ENV"/bin/x86_64-conda-linux-gnu-g++ 2>/dev/null || command -v g++)"; LINKFLAGS=""
+fi
+PYLIB="$("$ENV/bin/python" -c 'import sysconfig; print(sysconfig.get_config_var("LDLIBRARY").replace("lib","",1).split(".")[0])')"
+"$CXX" -std=c++14 -O3 -fPIC -shared $LINKFLAGS \
   -DARMA_DONT_USE_WRAPPER $ARMA_FLAGS \
   -I"$ENV/include" -I"$PYINC" -I"$NPINC" \
   Model.cpp Emissions.cpp Emissions_Dec.cpp Forward_Backward.cpp dihmm_ext.cpp \
   -L"$ENV/lib" -Wl,-rpath,"$ENV/lib" \
   -lboost_python311 -lboost_numpy311 -lboost_filesystem -lopenblas \
+  $( [ "$(uname)" = "Darwin" ] || echo "-l$PYLIB" ) \
   -o dihmm_ext.so
 echo "built $OUT/dihmm_ext.so"

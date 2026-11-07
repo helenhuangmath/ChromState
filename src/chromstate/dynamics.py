@@ -588,7 +588,7 @@ def _region_membership(bins: pd.DataFrame, regions: pd.DataFrame) -> List[np.nda
             continue
         starts, rows = entry
         lo = int(np.searchsorted(starts, start, side="left"))
-        hi = int(np.searchsorted(starts, end, side="right"))
+        hi = int(np.searchsorted(starts, end, side="left"))  # a bin starting at the end is outside
         out.append(rows[lo:hi])
     return out
 

@@ -63,7 +63,8 @@ class ChromStateDataset:
             raise ValueError(f"{len(self.marks)} mark names for {n_marks} columns of X")
         if len(self.bins) != n_rows:
             raise ValueError(f"bins has {len(self.bins)} rows but X has {n_rows}")
-        self.size_factors = np.asarray(self.size_factors, dtype=np.float64)
+        sf = np.asarray(self.size_factors)
+        self.size_factors = sf if sf.dtype in (np.float32, np.float64) else sf.astype(np.float64)
         if self.size_factors.ndim == 1:
             self.size_factors = np.repeat(self.size_factors[:, None], n_marks, axis=1)
         if self.size_factors.shape != (n_rows, n_marks):
@@ -164,6 +165,7 @@ def build_dataset(
     binset: BinSet,
     blacklist: Optional[pd.DataFrame] = None,
     reader_kwargs: Optional[Dict[str, dict]] = None,
+    dtype=np.float32,
 ) -> ChromStateDataset:
     """Load every file in a manifest into a joint dataset.
 
@@ -178,6 +180,10 @@ def build_dataset(
     reader_kwargs
         Per-format keyword arguments forwarded to the readers, e.g.
         ``{"bam": {"min_mapq": 20}}``.
+    dtype
+        Storage type of the signal matrix and size factors. ``float32`` (default)
+        halves the memory of a genome-wide tiling and is exact for counts below
+        16.7 million per bin; pass ``np.float64`` for peak scores with many digits.
     """
     from .io.counts import is_count_format, load_signal
     from .io.manifest import validate_manifest
@@ -197,8 +203,8 @@ def build_dataset(
     all_counts = True
 
     for sample in samples:
-        block = np.zeros((n_bins, len(marks)), dtype=np.float64)
-        ctrl = np.zeros((n_bins, len(marks)), dtype=np.float64)
+        block = np.zeros((n_bins, len(marks)), dtype=dtype)
+        ctrl = np.zeros((n_bins, len(marks)), dtype=dtype)
         for j, mark in enumerate(marks):
             entry = by_key[(sample, mark)]
             fmt = entry.resolved_format()
@@ -232,7 +238,7 @@ def build_dataset(
         marks=marks,
         bins=bins,
         chains=chains,
-        size_factors=np.ones((X.shape[0], len(marks))),
+        size_factors=np.ones((X.shape[0], len(marks)), dtype=dtype),
         control=control,
         is_count=all_counts,
         binset=binset,
@@ -288,6 +294,32 @@ def dataset_from_arrays(
         is_count=is_count,
         binset=BinSet(table=bins[["chrom", "start", "end"]], bin_size=bin_size, chain_slices=chains),
     )
+
+
+def estimate_memory(
+    genome_bp: int, resolution: int, n_samples: int, n_marks: int, n_states: int,
+    dtype_bytes: int = 4, mode: str = "genome", gene_window_bp: Optional[int] = None,
+) -> Dict[str, float]:
+    """Rough peak memory (GB) of a run, by component, before any streaming.
+
+    ``gene_window_bp`` is the total span of the gene windows (genes +/- flank, merged)
+    in gene mode. Counts, size factors and posteriors are the three large arrays; the
+    emission likelihood table (``bins x states``, float64) is transient during scoring
+    of one chain and is bounded by the longest chromosome, so it is listed separately.
+    """
+    span = genome_bp if mode == "genome" or gene_window_bp is None else gene_window_bp
+    n_bins = span / resolution
+    rows = n_bins * n_samples
+    gb = 1e-9
+    counts = rows * n_marks * dtype_bytes * gb
+    factors = rows * n_marks * dtype_bytes * gb
+    post = rows * n_states * 4 * gb
+    scores_u8 = rows * n_states * 1 * gb
+    longest = (span / resolution) * n_states * 8 * gb / max(n_samples, 1) if mode == "genome" else post
+    return {"bins_per_sample": n_bins, "counts_gb": counts, "size_factors_gb": factors,
+            "posterior_float32_gb": post, "scores_uint8_gb": scores_u8,
+            "in_memory_total_gb": counts + factors + post,
+            "streaming_peak_gb": counts / max(n_samples, 1) * 2 + longest}
 
 
 def make_genome_binset(

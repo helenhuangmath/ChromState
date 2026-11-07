@@ -126,7 +126,10 @@ def cmd_run(args: argparse.Namespace) -> int:
 
     ds, truth, note = _load_dataset(args)
     n_states = args.n_states or (truth.n_states if truth is not None else 7)
-    workroot = args.workdir or os.path.join(args.out, "work")
+    # Absolute: external tools are launched with cwd=<their workdir>, so a relative
+    # output path would make every file they are told to read or write point nowhere.
+    args.out = os.path.abspath(args.out)
+    workroot = os.path.abspath(args.workdir or os.path.join(args.out, "work"))
     os.makedirs(workroot, exist_ok=True)
 
     if args.dry_run:
@@ -158,6 +161,10 @@ def cmd_run(args: argparse.Namespace) -> int:
         path = os.path.join(args.out, "per_bin_calls.tsv.gz")
         frame_from_runs(ds, runs).to_csv(path, sep="\t", index=False)
         written.append(path)
+    if args.save_runs:
+        from .realdata import save_runs
+
+        written += save_runs(runs, os.path.join(args.out, "runs"))
 
     _print_frame(table[[c for c in ["method", "status", "ari", "biv_auprc", "bin_coverage",
                                     "runtime_s"] if c in table.columns]])
@@ -211,8 +218,74 @@ def build_parser() -> argparse.ArgumentParser:
                        help="also write every tool's per-bin call")
     p_run.add_argument("--dry-run", action="store_true",
                        help="print the command each tool would run, then stop")
+    p_run.add_argument("--save-runs", action="store_true",
+                       help="write every tool's per-bin states and posterior to <out>/runs/ "
+                            "so `realdata` can draw figures without re-running the tools")
     p_run.set_defaults(func=cmd_run)
+
+    p_real = sub.add_parser("realdata", help="evaluation figures on real data from saved runs: "
+                                             "state profiles, genome shares, promoter recovery, "
+                                             "expression prediction, locus views")
+    p_real.add_argument("--runs", required=True, action="append",
+                        help="<out>/runs from `run --save-runs`; repeat to merge runs made "
+                             "separately (a later directory replaces a tool from an earlier one)")
+    p_real.add_argument("--counts", required=True, help="the count matrix the runs were made on")
+    p_real.add_argument("--normalize", default="median_ratio", choices=("depth", "median_ratio", "none"))
+    p_real.add_argument("--gtf", default=None, help="gene annotation (GENCODE/Ensembl GTF)")
+    p_real.add_argument("--gene-types", default="protein_coding",
+                        help="comma-separated gene_type values to keep from the GTF; 'all' keeps every gene")
+    p_real.add_argument("--expression", default=None,
+                        help="genes x samples table (log scale), columns named after the samples")
+    p_real.add_argument("--contrast", default=None, help="two sample names 'A,B' for the change task")
+    p_real.add_argument("--flank", type=int, default=1000, help="promoter half-width in bp")
+    p_real.add_argument("--locus", action="append", default=[],
+                        help="chrom:start-end[:name]; may be repeated")
+    p_real.add_argument("--reference", default="chromstate")
+    p_real.add_argument("--comparison", default=None, help="comparison.csv from `run`, for the report")
+    p_real.add_argument("--seed", type=int, default=0)
+    p_real.add_argument("-o", "--out", required=True)
+    p_real.set_defaults(func=cmd_realdata)
     return parser
+
+
+def cmd_realdata(args: argparse.Namespace) -> int:
+    import chromstate as cs
+
+    from .realdata import load_runs, read_expression, read_gtf_genes, write_realdata_report
+
+    frame = pd.read_csv(args.counts, sep="\t")
+    ds = _dataset_from_frame(frame)
+    if args.normalize != "none":
+        cs.normalize(ds, method=args.normalize)
+    merged = {}
+    for d in args.runs:
+        for r in load_runs(d):
+            merged[r.tool] = r
+    runs = list(merged.values())
+    chroms = sorted(ds.bins["chrom"].unique())
+    features = expression = None
+    if args.gtf:
+        types = None if args.gene_types == "all" else tuple(args.gene_types.split(","))
+        features = read_gtf_genes(args.gtf, chroms=chroms, gene_types=types)
+        print(f"[realdata] {len(features):,} genes on {len(chroms)} chromosome(s)")
+    if args.expression:
+        expression = read_expression(args.expression, ds.samples)
+    contrast = tuple(args.contrast.split(",")) if args.contrast else None
+    loci = []
+    for spec in args.locus:
+        parts = spec.split(":")
+        chrom, rng = parts[0], parts[1]
+        a, b = (int(v.replace(",", "")) for v in rng.split("-"))
+        loci.append((chrom, a, b, parts[2] if len(parts) > 2 else f"{chrom}_{a}"))
+    comparison = pd.read_csv(args.comparison) if args.comparison else None
+    note = (f"Dataset: {args.counts} — {ds.n_rows:,} bin-rows, {ds.n_marks} marks "
+            f"({', '.join(ds.marks)}), samples {', '.join(ds.samples)}, chromosomes {', '.join(chroms)}.")
+    written = write_realdata_report(args.out, ds, runs, features, expression, args.flank, loci,
+                                    args.reference, contrast, comparison, note, args.seed)
+    print("wrote:")
+    for path in written:
+        print(f"  {path}")
+    return 0
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:

@@ -12,4 +12,8 @@ chromstate_out/
 .DS_Store
 
 # real-data analysis outputs (large, regenerable)
-analysis/*/out/
+analysis/*/out
+
+# cluster run scratch (see sbatch/_env.sh)
+tmp
+logs

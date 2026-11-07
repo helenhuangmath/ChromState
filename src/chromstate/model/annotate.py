@@ -36,6 +36,60 @@ STATE_COLORS: Dict[str, str] = {
     "Unknown": "#DDDDDD",
 }
 
+# Publication palette: the eight Okabe-Ito colours recommended by Wong (Nature Methods
+# 8:441, 2011, "Points of view: Color blindness"), which Nature's figure guidelines point
+# to as a colourblind-safe scheme. Each mnemonic family gets one hue; strength variants
+# (TssFlnk, EnhWk, TxWk, ReprPCWk, HetWk) take a lighter tint of the family hue so a
+# figure reads as "the same kind of state, weaker" rather than as a new category.
+OKABE_ITO = ["#D55E00", "#E69F00", "#CC79A7", "#009E73", "#0072B2", "#56B4E9", "#F0E442", "#000000"]
+STATE_COLORS_NATURE: Dict[str, str] = {
+    "TssA": "#D55E00",      # vermillion
+    "TssFlnk": "#EE9E70",   # vermillion tint
+    "TssBiv": "#CC79A7",    # reddish purple
+    "BivFlnk": "#E2B2CB",
+    "EnhA": "#E69F00",      # orange
+    "EnhWk": "#F2CB80",
+    "EnhBiv": "#B07AA1",
+    "Tx": "#009E73",        # bluish green
+    "TxWk": "#7FD0B9",
+    "ReprPC": "#0072B2",    # blue
+    "ReprPCWk": "#80B9D9",
+    "Het": "#56B4E9",       # sky blue
+    "HetWk": "#ABDAF4",
+    "ZNF/Rpts": "#F0E442",  # yellow
+    "Quies": "#E8E8E8",     # light grey (not in Wong's set; a neutral for "nothing")
+    "Unknown": "#999999",
+}
+
+# The scheme of Huang, Baxter et al., Sci Rep 15:17359 (2025), Supplementary Fig. S4a:
+# a 10-state ChromHMM model whose states are grouped into I Active (reds), II Poised
+# (magenta), III Repressed (blues), IV Repetitive/Heterochromatin (violet) and Low
+# signal (grey). Hex values were sampled from the published figure. Families ChromState
+# can name that the paper's panel lacked (transcription, enhancers) sit in the Active
+# group as lighter reds, since that is where H3K27ac-marked non-promoter states fell.
+SCIREP2025_GROUP_COLORS: Dict[str, str] = {
+    "active": "#AE231B", "poised": "#BA5AC5", "repressed": "#395493",
+    "heterochromatin": "#815DAA", "background": "#9E9E9E",
+}
+STATE_COLORS_SCIREP2025: Dict[str, str] = {
+    "TssA": "#E64C3B",      # states 1-2: strong active
+    "TssFlnk": "#E76E5B",   # states 3-4: weaker active
+    "EnhA": "#E76E5B",
+    "EnhWk": "#F2A595",
+    "Tx": "#EE8E7D",
+    "TxWk": "#F5BFB4",
+    "TssBiv": "#B25FA7",    # states 5-6: poised
+    "BivFlnk": "#C98BC0",
+    "EnhBiv": "#C98BC0",
+    "ReprPC": "#3F65A8",    # state 7: repressed
+    "ReprPCWk": "#7C90C7",  # state 8: weaker repressed
+    "Het": "#865DA8",       # state 9: repetitive / heterochromatin
+    "HetWk": "#AD93C8",
+    "ZNF/Rpts": "#AD93C8",
+    "Quies": "#E3E3E3",     # state 10: low signal
+    "Unknown": "#9E9E9E",
+}
+
 # Spelled-out state names, keyed by mnemonic. Figures print these rather than the
 # mnemonics: the abbreviations are only legible to people already fluent in ChromHMM
 # output, and a figure has to stand on its own.

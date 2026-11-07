@@ -76,7 +76,7 @@ metric compares against), `--per-bin` to dump every tool's call per bin for IGV.
 repository and its output mapping checked against the tool's own files (for example,
 ChromHMM's segment BED against its posterior argmax). ChromHMM 1.28, EpiCSeg 1.0, normR
 1.36.0 and diHMM (ykai16 C++) are verified; what running them changed is in each
-adapter's docstring. Entries in `tools.json` (Segway, epigenome-ssm) ship with
+adapter's docstring. Segway has a dedicated adapter too (Linux only, see below). Entries in `tools.json` (epigenome-ssm) ship with
 `verified: false`: their command lines are transcribed from documentation and have
 **not** been run. `check` prints the flag, and `REPORT.md` warns about any unverified tool
 whose numbers it prints.
@@ -126,9 +126,9 @@ Placeholders: `{workdir} {outdir} {counts} {regions} {binary_dir} {n_states} {se
 or `labels` (one label per exported bin, in row order); add `posterior_path` if the tool
 writes a per-bin posterior matrix and you want the calibration metrics.
 
-Shipped-but-disabled entries for **Segway** and **epigenome-ssm** are starting points —
-the closest prior art named in `docs/PLAN.md` §0 that has not been run here. Segway needs
-GMTK, which is Linux-only; on macOS it needs a linux/amd64 container (see below).
+The shipped-but-disabled entry for **epigenome-ssm** is a starting point — prior art
+named in `docs/PLAN.md` §0 that has not been run here. Segway is now a real adapter
+(`methods/segway.py`); it needs GMTK, which is Linux-only (see "Segway on Linux").
 
 ## Recreating the benchmark environment
 
@@ -174,6 +174,54 @@ bash tools/setup/benchrun.sh python tools/run_tools.py run -o compare_sim \
 bash tools/setup/benchrun.sh python tools/scaling.py -o scaling \
     --sizes 6250,25000,100000 --tools chromstate,chromhmm,epicseg,normr,dihmm
 ```
+
+## Real data: the same tools on the CD8 T-cell CUT&RUN bins
+
+Simulated truth cannot be had for a real genome, so `realdata` scores every tool against
+external biology instead -- gene annotation and RNA-seq the tools never saw -- with the
+same cross-validation for every row. The Sci Rep 2025 CD8 T-cell data
+(`analysis/scireports2025/out/binned`, three cell states, four marks, 200 bp) is the
+built-in example:
+
+```bash
+python tools/realdata/export_cd8_counts.py --chroms chr19 -o tmp/realbench/cd8_chr19
+python tools/run_tools.py run --counts tmp/realbench/cd8_chr19/counts.tsv -o out_k15 \
+    --n-states 15 --tools chromstate,chromhmm,epicseg,normr,dihmm,segway --save-runs
+python tools/run_tools.py realdata --runs out_k15/runs --counts tmp/realbench/cd8_chr19/counts.tsv \
+    --gtf gencode.vM25.annotation.gtf.gz --expression rna_log_expression.tsv --contrast Naive,Cl13 \
+    --locus chr19:29250000-29500000:Cd274 --comparison out_k15/comparison.csv -o out_k15/realdata
+```
+
+`--save-runs` keeps every tool's per-bin states (and posterior) under `<out>/runs/`, so
+`realdata` can be rerun, or runs made separately merged (`--runs a/runs --runs b/runs`),
+without touching the tools again. On the cluster `../testing/sbatch/realbench.sbatch` does both
+steps (`--export=ALL,K=15,TOOLS=chromstate+chromhmm+epicseg,RUNTAG=x`; sbatch splits
+`--export` on commas, hence `+`), and `../testing/sbatch/realdata_figs.sbatch` redraws.
+
+What `realdata` writes (`toolbench/realdata.py`):
+
+| Figure | Question it answers |
+|---|---|
+| `state_profiles` | what each state of each tool is, as log2 fold of every mark over the genome mean; states ordered active → bivalent → Polycomb → heterochromatin → quiescent and coloured by a **mark blend** (red active, blue H3K27me3, violet H3K9me3, magenta both), so tools are drawn in one language without matching their states |
+| `state_class_fractions` | how much of each sample's genome a tool puts in each class |
+| `segment_lengths` | segment length distributions (over-segmentation shows here) |
+| `state_overlap` | how each tool's states partition ChromState's (P(tool state \| ChromState state)) |
+| `promoter_recovery` | cross-validated AUPRC for finding TSS bins, and the TSS bins of the top-30 % expressed genes, from each tool's states alone; per bin the score is its state's promoter rate learned on the *other* half of the 1 Mb blocks, so a tool gains nothing from merely having many states |
+| `expression_prediction` | held-out Spearman between expression and a gradient-boosted model of the promoter's state composition, for expression **level** (all gene × sample pairs, folds by 1 Mb block) and **change** between two conditions; a raw-mark-signal row is the no-segmentation baseline |
+| `locus_<name>` | browser view: the marks, every tool's states as coloured strips, genes |
+
+`REPORT.md` repeats the tables. None of these is a score against truth; each says how
+well a tool's states, used naively, answer a question about genes it never saw.
+
+### Segway on Linux
+
+Segway needs GMTK, so it runs only on Linux. bioconda's `gmtk` links an older HDF5 than
+current `genomedata`, so two envs are used: `conda create -p env_segway -c conda-forge
+-c bioconda segway` and `conda create -p env_gmtk -c conda-forge -c bioconda gmtk
+"hdf5=1.10.*"`, then `export SEGWAY_ENV=env_segway SEGWAY_GMTK_ENV=env_gmtk`. The
+adapter (`methods/segway.py`) loads all samples into one genomedata archive as
+pseudo-chromosomes `<chrom>__<sample>`, trains one model (`--max-train-rounds`
+`SEGWAY_MAX_ROUNDS`, default 10; one instance) and annotates; hard labels only.
 
 ## Metrics
 

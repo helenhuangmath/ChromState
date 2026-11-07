@@ -141,3 +141,16 @@ def test_bad_inputs_raise(fitted):
         rg.make_model("nope")
     with pytest.raises(ValueError):
         rg.rank_states_for_expression(gq)
+
+
+def test_folds_keep_stacked_gene_copies_together():
+    # Level task stacks samples: gene g appears once per sample, all on one chromosome.
+    # Fallback blocks must be cut over unique genes, or a gene's copies leak across folds.
+    import numpy as np
+    from chromstate.regulation import _folds
+
+    genes = np.array([f"g{i}" for i in range(60)])
+    keys = np.tile(genes, 4)                      # 4 stacked samples
+    groups = np.repeat("chr19", len(keys))
+    for tr, te in _folds(groups, 5, keys=keys):
+        assert not set(keys[tr]) & set(keys[te])

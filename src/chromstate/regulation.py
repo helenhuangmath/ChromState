@@ -51,7 +51,7 @@ from .model.core import Segmentation
 EPS = 1e-12
 
 #: Column prefix for each gene part.
-PART_PREFIX = {"promoter": "P", "body": "B", "gene": "G"}
+PART_PREFIX = {"promoter": "P", "body": "B", "gene": "G", "distal": "E", "regulatory": "R"}
 
 #: Per-state quantities, in column order.
 STATE_QUANTITIES = ("occ", "int", "dose")
@@ -152,6 +152,7 @@ def gene_quantification(
     assign: str = "all",
     include_signal: bool = True,
     mark_weights: Optional[np.ndarray] = None,
+    regions: Optional[Dict[str, pd.DataFrame]] = None,
 ) -> pd.DataFrame:
     """Quantify every state in every gene part, per sample: the table that meets RNA-seq.
 
@@ -171,13 +172,21 @@ def gene_quantification(
     ``mark_weights`` fixes the intensity weights (see :func:`state_mark_weights`); pass
     them when quantifying one chromosome at a time so intensities are comparable across
     chromosomes.
+
+    ``regions`` maps a part name to its own region table (``gene_id``, ``chrom``,
+    ``start``, ``end``; several rows per gene allowed), overriding ``features.regions``.
+    :func:`chromstate.regions.gene_regulatory_quantification` uses it to add the distal
+    enhancer space (prefix ``E_``) under a :class:`chromstate.regions.RegionScheme`.
     """
     ds = seg.dataset
     part_kwargs = part_kwargs or {}
     labels = list(seg.labels)
     intensity = state_intensity(seg, mark_weights)
     Z = np.log1p(ds.X / np.maximum(ds.size_factors, EPS))
-    regions = {p: features.regions(p, **part_kwargs.get(p, {})) for p in parts}
+    regions = dict(regions or {})
+    for p in parts:
+        if p not in regions:
+            regions[p] = features.regions(p, **part_kwargs.get(p, {}))
 
     frames = []
     for sample in ds.samples:
@@ -334,22 +343,50 @@ def make_model(model: ModelSpec = "hgb", seed: int = 0):
     raise ValueError(f"model must be 'hgb', 'xgboost', 'ridge' or a callable, got {model!r}")
 
 
-def _folds(groups: np.ndarray, n_splits: int):
+def _folds(groups: np.ndarray, n_splits: int, keys: Optional[np.ndarray] = None):
+    """Folds grouped by chromosome; with fewer chromosomes than folds, by consecutive
+    blocks of genes within each chromosome (genes are in positional order in the gene
+    table), so neighbouring genes still fall on the same side of a split.
+
+    ``keys`` (gene ids) matters when samples are stacked: blocks are then cut over the
+    *unique* genes, so every stacked copy of a gene lands in the same fold. Without it,
+    blocks of rows would split a gene's copies across folds and leak it into training."""
+    import warnings
+
     from sklearn.model_selection import GroupKFold
 
+    groups = np.asarray(groups).astype(str)
     n_groups = len(np.unique(groups))
+    if n_groups < min(n_splits, 2) or (n_groups < n_splits and len(groups) >= 10 * n_splits):
+        per_chrom = max(2, int(np.ceil(n_splits / max(n_groups, 1))))
+        blocks = np.empty(len(groups), dtype=object)
+        key_arr = None if keys is None else np.asarray(keys).astype(str)
+        for g in np.unique(groups):
+            idx = np.flatnonzero(groups == g)
+            if key_arr is None:
+                chunk = np.minimum(np.arange(len(idx)) * per_chrom // max(len(idx), 1), per_chrom - 1)
+            else:
+                uniq, first, inv = np.unique(key_arr[idx], return_index=True, return_inverse=True)
+                rank = np.empty(len(uniq), dtype=np.int64)
+                rank[np.argsort(first, kind="stable")] = np.arange(len(uniq))  # first-appearance order
+                chunk = np.minimum(rank[inv] * per_chrom // max(len(uniq), 1), per_chrom - 1)
+            blocks[idx] = [f"{g}:{c}" for c in chunk]
+        warnings.warn(f"only {n_groups} chromosome(s): folds are {per_chrom} consecutive gene blocks per "
+                      f"chromosome instead of whole chromosomes", RuntimeWarning, stacklevel=3)
+        groups = blocks.astype(str)
+        n_groups = len(np.unique(groups))
     if n_groups < 2:
-        raise ValueError("cross-validation needs genes on at least 2 chromosomes")
+        raise ValueError("cross-validation needs at least 2 groups of genes")
     return list(GroupKFold(n_splits=min(n_splits, n_groups)).split(groups, groups=groups))
 
 
 def cross_validated_predictions(
     X: np.ndarray, y: np.ndarray, groups: np.ndarray, model: ModelSpec = "hgb",
-    n_splits: int = 5, seed: int = 0,
+    n_splits: int = 5, seed: int = 0, keys: Optional[np.ndarray] = None,
 ) -> np.ndarray:
-    """Out-of-fold predictions with folds grouped by chromosome."""
+    """Out-of-fold predictions with folds grouped by chromosome (``keys``: see :func:`_folds`)."""
     pred = np.full(len(y), np.nan)
-    for tr, te in _folds(groups, n_splits):
+    for tr, te in _folds(groups, n_splits, keys=keys):
         pred[te] = make_model(model, seed).fit(X[tr], y[tr]).predict(X[te])
     return pred
 
@@ -456,7 +493,7 @@ def compare_representations(
             X = _top_state_onehot(task.X, cols)
         else:
             X = task.X[cols].to_numpy(dtype=float)
-        p = cross_validated_predictions(X, y, task.groups, model, n_splits, seed)
+        p = cross_validated_predictions(X, y, task.groups, model, n_splits, seed, keys=task.X.index.to_numpy())
         preds[name] = p
         boots[name] = _spearman_boot(y, p, boot_idx)
         rows.append({"family": name, "n_features": X.shape[1],
@@ -558,7 +595,7 @@ def state_importance(
     col_idx = {c: i for i, c in enumerate(all_cols)}
     X = X_df[all_cols].to_numpy(dtype=float)
     y = task.y.to_numpy(dtype=float)
-    folds = _folds(task.groups, n_splits)
+    folds = _folds(task.groups, n_splits, keys=task.X.index.to_numpy())
     rng = np.random.default_rng(seed)
 
     base_pred = np.full(len(y), np.nan)
@@ -587,7 +624,7 @@ def state_importance(
         boot = np.array([diff[ii].sum() / max(np.sum((y[ii] - y[ii].mean()) ** 2), EPS)
                          for ii in boot_idx])
         single = cross_validated_predictions(X_df[cols].to_numpy(dtype=float), y, task.groups,
-                                             model, n_splits, seed)
+                                             model, n_splits, seed, keys=X_df.index.to_numpy())
         dcol = _direction_column(cols)
         dv = X_df[dcol].to_numpy(dtype=float)
         ok = np.isfinite(dv)
