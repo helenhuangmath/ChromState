@@ -1,7 +1,7 @@
 # Tutorial 2 — Application: chromatin states and gene expression in CD8 T-cell differentiation
 
 
-Pre-generated [CD8 T-cell example figures](../figures/README.md#cd8-t-cell-application) are included for browsing.
+Pre-generated [CD8 T-cell example figures](https://github.com/helenhuangmath/ChromState/blob/main/docs/figures/README.md#cd8-t-cell-application) are included for browsing.
 
 This tutorial applies ChromState to primary mouse CD8 T cells in three differentiation
 states. It works through each analysis step: building the chromatin state model, linking
@@ -13,7 +13,7 @@ it to RNA-seq, and asking four biological questions.
 3. Which chromatin states matter most, and do marks act additively or in combination?
 4. Do chromatin changes tend to precede or follow transcriptional change?
 
-All code is in [`analysis/scireports2025/`](../../analysis/scireports2025/). The figures
+All code is in [`analysis/scireports2025/`](https://github.com/helenhuangmath/ChromState/tree/main/analysis/scireports2025). The figures
 are Nature-style PDFs written to `analysis/scireports2025/out/figures/`.
 
 ---
@@ -65,7 +65,7 @@ python s12_marker_genes.py    # Fig 6
 ```
 
 Results with interpretation and Nature-style figure legends are collected in
-[`analysis/scireports2025/RESULTS.md`](../../analysis/scireports2025/RESULTS.md).
+[`analysis/scireports2025/RESULTS.md`](https://github.com/helenhuangmath/ChromState/blob/main/analysis/scireports2025/RESULTS.md).
 
 Shared paths and constants are in `common.py`, and the figure style in `nature_style.py`.
 

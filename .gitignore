@@ -11,11 +11,6 @@ benchmark_out/
 chromstate_out/
 .DS_Store
 
-# Claude local instructions and agent workspaces
-.claude/
-CLAUDE.md
-CLAUDE.local.md
-
 # real-data analysis outputs (large, regenerable)
 analysis/*/out
 

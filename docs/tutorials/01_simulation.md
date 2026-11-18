@@ -1,7 +1,7 @@
 # Tutorial 1 — Simulation: checking ChromState against known ground truth
 
 
-Pre-generated [simulation figures](../figures/README.md#simulation) are included for browsing.
+Pre-generated [simulation figures](https://github.com/helenhuangmath/ChromState/blob/main/docs/figures/README.md#simulation) are included for browsing.
 
 This tutorial simulates a two-condition chromatin experiment in which every state, every
 bivalent region and every perturbed region is known in advance. It then runs the
@@ -15,7 +15,7 @@ You will:
 - benchmark ChromState against competing statistical models on identical input.
 
 **Time:** about 2 minutes on a laptop. **Requires:** `pip install -e ".[all]"` (see the
-main [README](../../README.md)).
+main [README](https://github.com/helenhuangmath/ChromState#readme)).
 
 ---
 
@@ -258,7 +258,7 @@ How to read it:
 - EpiSegMix's and diHMM's *software* has not been run here; the rows marked "-like" are
   their published models on identical input. `tools/tools.json` carries disabled
   adapters for both, and for normR, Segway and EpiCSeg, to be enabled when the software
-  is installed. [docs/tool_comparison.md](../tool_comparison.md) compares the tools
+  is installed. [docs/tool_comparison.md](https://github.com/helenhuangmath/ChromState/blob/main/docs/tool_comparison.md) compares the tools
   themselves, not just their models.
 
 ### 7.2 Choosing the inference algorithm
@@ -349,7 +349,7 @@ importance, which has no such problem.
    entropy as plasticity.
 4. **The simulation favours ChromState.** The data come from the model family ChromState
    fits, so these benchmarks test correctness, not superiority. Real-data evaluation is
-   in [Tutorial 2](02_cd8_tcell_application.md).
+   in [Tutorial 2](https://github.com/helenhuangmath/ChromState/blob/main/docs/tutorials/02_cd8_tcell_application.md).
 
 ---
 
@@ -368,4 +368,4 @@ importance, which has no such problem.
 - **Calibration.** Temperature scaling, $\gamma^{1/T}$ renormalised, softens
   over-confident posteriors without changing the hard calls.
 
-Full derivations are in [`docs/readme_details.txt`](../readme_details.txt), section 7.
+Full derivations are in [`docs/readme_details.txt`](https://github.com/helenhuangmath/ChromState/blob/main/docs/readme_details.txt), section 7.

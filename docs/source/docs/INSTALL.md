@@ -17,10 +17,17 @@ Optional packages:
 
 ## Install with pip
 
-From GitHub:
+The [GitHub release](https://github.com/helenhuangmath/ChromState/releases/tag/v1.1)
+provides a Python wheel and source distribution. Install the wheel with pip.
 
 ```bash
-pip install "chromstate[all] @ git+https://github.com/helenhuangmath/ChromState.git"
+python -m pip install https://github.com/helenhuangmath/ChromState/releases/download/v1.1/chromstate-1.1.0-py3-none-any.whl
+```
+
+To install version 1.1 with optional dependencies from Git:
+
+```bash
+python -m pip install "chromstate[all] @ git+https://github.com/helenhuangmath/ChromState.git@v1.1"
 ```
 
 From a clone, in editable mode:
