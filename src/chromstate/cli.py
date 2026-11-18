@@ -96,6 +96,9 @@ def cmd_fit(args) -> int:
     table.to_csv(os.path.join(args.out, "quantification.tsv.gz"), sep="\t", index=False)
     cs.summarize(table).to_csv(os.path.join(args.out, "summary.tsv"), sep="\t")
 
+    if getattr(args, "gtf", None):
+        _genes_and_importance(args, seg, ds)
+
     if not args.no_figures:
         figs = {
             "emissions": viz.plot_emission_heatmap(seg),
@@ -116,6 +119,40 @@ def cmd_fit(args) -> int:
 
     print(f"[chromstate] done -> {args.out}", file=sys.stderr)
     return 0
+
+
+def _genes_and_importance(args, seg, ds) -> None:
+    """Gene-level state composition and, with expression, per-state importance tables."""
+    import chromstate as cs
+
+    features = cs.FeatureSet.from_gtf(args.gtf)
+    gs = cs.gene_state_matrix(seg, features, part=args.gene_part)
+    gs.to_csv(os.path.join(args.out, f"gene_states_{args.gene_part}.tsv.gz"), sep="\t", index=False)
+    print(f"[chromstate] wrote state composition for {gs['gene_id'].nunique()} genes "
+          f"({args.gene_part})", file=sys.stderr)
+    if not getattr(args, "expression", None):
+        return
+    expr = cs.read_expression(args.expression)
+    chrom = features.table.set_index("gene_id")["chrom"]
+    if args.log_expression:
+        import numpy as np
+
+        for col in expr.columns:
+            if col != "gene_id":
+                expr[col] = np.log2(expr[col].astype(float) + 1.0)
+    for sample in ds.samples:
+        if sample not in expr.columns:
+            print(f"[chromstate] expression table has no column {sample!r}; skipped", file=sys.stderr)
+            continue
+        one = gs.loc[gs["sample"] == sample]
+        res = cs.composition_state_importance(one, expr.set_index("gene_id")[sample], groups=chrom,
+                                  model=args.importance_model, seed=args.seed)
+        path = os.path.join(args.out, f"state_importance_{sample}.tsv")
+        res.table.to_csv(path, sep="\t", index=False)
+        print(f"[chromstate] {sample}: out-of-fold Spearman {res.cv_spearman:.3f}; "
+              f"top state {res.table.iloc[0]['state']} -> {path}", file=sys.stderr)
+        with open(os.path.join(args.out, f"state_importance_{sample}.txt"), "w") as fh:
+            fh.write(res.note + "\n")
 
 
 def cmd_selectk(args) -> int:
@@ -292,7 +329,12 @@ def build_parser() -> argparse.ArgumentParser:
     f = sub.add_parser("fit", help="fit a model and write states, scores, and figures")
     _add_input_args(f)
     f.add_argument("-k", "--n-states", type=int, default=10)
-    f.add_argument("--emission", default="auto", choices=["auto", "nb", "gaussian", "bernoulli"])
+    f.add_argument("--emission", default="auto", choices=["auto", "nb", "zinb", "poisson", "negative_multinomial", "gaussian", "bernoulli"])
+    f.add_argument("--gtf", help="gene annotation (GTF); writes per-gene state composition")
+    f.add_argument("--expression", help="gene x sample expression table (gene_id + one column per sample); with --gtf, writes per-state importance for expression")
+    f.add_argument("--gene-part", default="promoter", choices=["promoter", "body"])
+    f.add_argument("--importance-model", default="ridge", choices=["ridge", "gbm"])
+    f.add_argument("--no-log-expression", dest="log_expression", action="store_false", help="expression is already on a log scale")
     f.add_argument("--restarts", type=int, default=3)
     f.add_argument("--seed", type=int, default=0)
     f.add_argument("--states", default=None,
@@ -309,7 +351,7 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("selectk", help="choose the number of states by held-out likelihood")
     _add_input_args(s)
     s.add_argument("--candidates", default="4,6,8,10,12,15,18")
-    s.add_argument("--emission", default="auto", choices=["auto", "nb", "gaussian", "bernoulli"])
+    s.add_argument("--emission", default="auto", choices=["auto", "nb", "zinb", "poisson", "negative_multinomial", "gaussian", "bernoulli"])
     s.add_argument("--seed", type=int, default=0)
     s.add_argument("-o", "--out", default="chromstate_out")
     s.set_defaults(func=cmd_selectk)

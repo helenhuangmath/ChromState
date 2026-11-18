@@ -21,6 +21,7 @@ The functions used most often are available directly from the `chromstate` names
    chromstate.features
    chromstate.regions
    chromstate.regulation
+   chromstate.importance
    chromstate.resolution
    chromstate.summary
    chromstate.patterns

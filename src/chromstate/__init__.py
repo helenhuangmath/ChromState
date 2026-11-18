@@ -57,6 +57,13 @@ from .features import (
     trace_gene,
 )
 from .genome import BinSet, Genome
+from .importance import (
+    ImportanceResult,
+    gene_hard_state_fractions,
+    state_importance_change,
+)
+from .importance import compare_representations as compare_composition_representations
+from .importance import state_importance as composition_state_importance
 from .io.counts import load_signal, read_bed_regions
 from .io.manifest import MarkFile, read_manifest
 from .model.core import Segmentation, fit, select_n_states
@@ -112,7 +119,7 @@ from .rna import (
     rank_traceable_genes,
     read_expression,
 )
-from .simulate import simulate
+from .simulate import simulate, simulate_genes_and_expression
 from .summary import compare_conditions, condition_summary, flow_test, state_summary, state_tests
 
 __all__ = [
@@ -212,6 +219,12 @@ __all__ = [
     "replicate_noise_floor",
     "select_n_states",
     "simulate",
+    "simulate_genes_and_expression",
+    "ImportanceResult",
+    "compare_composition_representations",
+    "composition_state_importance",
+    "gene_hard_state_fractions",
+    "state_importance_change",
     "state_entropy",
     "state_flow",
     "state_importance",

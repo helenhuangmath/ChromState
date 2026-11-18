@@ -16,7 +16,7 @@ tools/
   setup/           recreate the conda env, patches for current R/Armadillo, env wrapper
   toolbench/
     methods/       EVERY COMPARED METHOD LIVES HERE
-      internal.py    ChromState, ChromHMM-like, Segway-like, GMM, k-means, naive signal
+      internal.py    ChromState, ChromHMM-, Segway-, EpiCSeg-, EpiSegMix-, diHMM-, normR-like, GMM, k-means, naive
       chromhmm.py    real ChromHMM (java -jar ChromHMM.jar LearnModel)          [verified]
       epicseg.py     real EpiCSeg (normalizecounts + segment)                   [verified]
       normr.py       real normR (enrichR per mark; patterns + bivalency only)   [verified]

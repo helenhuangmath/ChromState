@@ -56,8 +56,8 @@ packages = ["src/chromstate"]
 [tool.hatch.build.targets.sdist]
 # source, tests and the text documentation; figures and analysis outputs stay in the repository
 include = ["src", "tests", "tools", "docs/source", "docs/tutorials", "docs/*.md",
-           "README.md", "LICENSE", "CHANGELOG.md", "CITATION.cff", "CONTRIBUTING.md",
-           "CODE_OF_CONDUCT.md", "environment.yml", "pyproject.toml"]
+           "README.md", "LICENSE", "CHANGELOG.md", "CITATION.cff", "environment.yml",
+           "pyproject.toml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

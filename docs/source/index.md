@@ -5,7 +5,7 @@
 
 # ChromState: quantitative chromatin state analysis
 
-**Latest release:** 1.0.0 —
+**Latest release:** 1.1.0 —
 [GitHub](https://github.com/helenhuangmath/ChromState) ·
 [Changelog](CHANGELOG.md)
 
@@ -34,7 +34,7 @@ peak files, in the same sample-by-mark table that ChromHMM uses.
 | Predict expression and rank states | [`chromstate predict`](docs/predict.md) | `cs.predict_expression` |
 | Benchmark against other models | [`chromstate compare`](docs/compare.md) | `chromstate.benchmark` |
 
-## Changes for ChromState 1.0.0
+## Changes for ChromState 1.1.0
 
 ### Features
 
@@ -112,15 +112,14 @@ chromstate predict --genes run_out/genes/gene_quantification.tsv.gz \
 
 ## Contribute
 
-Please read the [code of conduct](CODE_OF_CONDUCT.md) and the
-[contributing guide](CONTRIBUTING.md). Questions and bug reports go to the
+Questions, bug reports and feature requests go to the
 [issue tracker](https://github.com/helenhuangmath/ChromState/issues).
 
 ## Citation
 
 If you use ChromState, please cite the software (see `CITATION.cff` in the repository):
 
-> Huang H. ChromState: quantitative chromatin state analysis. Version 1.0.0 (2026).
+> Huang H. ChromState: quantitative chromatin state analysis. Version 1.1.0 (2026).
 > https://github.com/helenhuangmath/ChromState
 
 ## Other useful links
@@ -143,8 +142,6 @@ docs/fileformats_index
 docs/tutorial
 docs/benchmarks
 docs/qa
-CODE_OF_CONDUCT
-CONTRIBUTING
 CHANGELOG
 docs/api/index
 ```

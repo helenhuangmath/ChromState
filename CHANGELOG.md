@@ -7,6 +7,11 @@ All notable changes to ChromState are recorded here. The format follows
 ## [1.1.0] - 2026-11-18
 
 ### Added
+- Poisson, zero-inflated negative-binomial, and negative multinomial emissions,
+  plus additional segmentation baselines and an algorithm benchmark.
+- Gene composition and state importance from `chromstate fit`, the Python
+  `chromstate.importance` module, and the R interface.
+- Fused inference and count-emission kernels when Numba is available.
 - Documentation site built with Sphinx (`docs/source`), with one page per subcommand,
   file formats, tutorials, benchmarks, a Q&A and an API reference, deployed to GitHub
   Pages by `.github/workflows/docs.yml`.
@@ -14,8 +19,7 @@ All notable changes to ChromState are recorded here. The format follows
   them: `viz.figure_mm`, `viz.panel_letter`, `viz.check_nature_style`, `viz.save_figure`.
 - Real-data validation on ENCODE ChIP-seq (GM12878, K562, H1) and a replicate-level CD8
   T-cell CUT&RUN comparison, including a null contrast between two batches.
-- Project files: `CITATION.cff`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`,
-  `environment.yml`, issue and pull-request templates, and a release workflow.
+- Project files: `CITATION.cff`, `environment.yml`, issue and pull-request templates, and a release workflow.
 - `fast` extra (`pip install "chromstate[fast]"`) that installs Numba.
 
 ## [1.0.0]

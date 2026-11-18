@@ -73,7 +73,7 @@ def test_external_tools_are_registered_and_flagged_honestly():
         assert key in table.index
         assert bool(table.loc[key, "verified"]), key
     # Command templates in tools.json have not been, and must say so.
-    for key in ("segway", "epigenome_ssm"):
+    for key in ("segway", "epigenome_ssm", "episegmix"):
         assert not bool(table.loc[key, "verified"]), key
     # An unavailable tool must still explain itself.
     for key in table.index[~table["available"].astype(bool)]:

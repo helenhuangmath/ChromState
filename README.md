@@ -49,8 +49,9 @@ For every genomic bin, ChromState reports:
 
 Between conditions, it measures state flow and transport, sets a replicate-derived
 noise floor, calibrates posteriors and tests regions for change. At the gene level, it
-connects state composition to RNA-seq and traces any result back to its bins, marks and
-read counts.
+connects state composition to RNA-seq, ranks the states by how much each contributes to
+predicting expression and its change (with cross-validation grouped by chromosome and
+bootstrap intervals), and traces any result back to its bins, marks and read counts.
 
 **Performance.**
 - **Simulation with known ground truth.** Retaining signal magnitude substantially
@@ -61,6 +62,14 @@ read counts.
   quantitative states predict gene expression and its changes between cell states more
   accurately than discrete state labels, and they add information beyond raw mark
   signal.
+- **Against the field.** On identical simulated bins, ChromState ties the zero-inflated
+  (EpiSegMix-like) and hierarchical (diHMM-like) count models and leads the Gaussian
+  (Segway-like), negative-multinomial (EpiCSeg-like), binarised (real ChromHMM 1.28)
+  and enrichment-calling (normR-like) approaches on state recovery and calibration
+  ([Tutorial 1 §7.1](docs/tutorials/01_simulation.md), [tool comparison](docs/tool_comparison.md)).
+- **State importance recovers planted effects.** With expression simulated from a known
+  linear effect of three promoter states, `state_importance` ranks exactly those three
+  first, with the right signs and relative magnitudes, and leaves the other four flat.
 - **Poised promoters.** Bivalent and Polycomb-marked promoters identified in naive
   cells anticipate genes that change expression later in differentiation.
 
@@ -182,8 +191,10 @@ pip install -e ".[all]"        # numpy, scipy, pandas, scikit-learn, matplotlib,
 ```
 
 `pysam` is required only for BAM input and `pyBigWig` only for bigWig input. Numba is
-used automatically if installed and accelerates the forward–backward and Viterbi
-recursions.
+used automatically if installed: the forward–backward pass then runs all chromosomes of
+all samples in one fused kernel, in parallel across CPU cores (`NUMBA_NUM_THREADS`), and
+the count likelihoods are gathered in a single pass. Without numba the same results are
+produced by the NumPy reference path, more slowly.
 
 The R interface calls the Python package through `reticulate`:
 
@@ -233,6 +244,15 @@ chromstate fit --manifest cellmarkfiletable.txt --chrom-sizes mm10.chrom.sizes \
                -k 12 --norm median_ratio --blacklist mm10.blacklist.bed -o fit_out
 ```
 
+With a gene annotation and an expression table, `fit` also quantifies every gene and
+ranks the states by their contribution to expression:
+
+```bash
+chromstate fit --manifest cellmarkfiletable.txt --chrom-sizes mm10.chrom.sizes -k 12 \
+               --gtf gencode.vM25.annotation.gtf --expression expression.tsv -o fit_out
+# expression.tsv: gene_id <TAB> CD8_naive <TAB> CD8_exhausted ...  (counts/TPM; log2(x+1) applied)
+```
+
 `chromstate fit` writes the following files:
 
 | File | Content |
@@ -244,6 +264,8 @@ chromstate fit --manifest cellmarkfiletable.txt --chrom-sizes mm10.chrom.sizes \
 | `quantification.tsv.gz` | One row per bin and sample: every per-bin quantity in section 5.5 |
 | `summary.tsv` | Per-sample summary of the quantification table |
 | `figures/*.pdf` | Emissions, transitions, coverage, browser track, confidence, bivalency, attribution, state flow, occupancy change |
+| `gene_states_promoter.tsv.gz` | With `--gtf`: state composition, entropy and mark signal per gene and sample |
+| `state_importance_<sample>.tsv` | With `--expression`: per-state permutation and drop-one importance, signed coefficient, intervals, rank |
 
 Other commands:
 - `chromstate predict` predicts expression from the per-gene state table and ranks states (section 5.11).
@@ -416,6 +438,12 @@ per-mark profile. By default it keeps restarting until the best log-likelihood h
 reached at least twice (`adaptive_restarts=True`). It records `restart_hits_at_best`,
 `min_state_separation` and a `collapsed` flag, and warns when a fit appears degenerate.
 
+`emission` defaults to the negative binomial. `zinb` (zero-inflated NB) is available for
+data with excess empty bins, `poisson` and `negative_multinomial` (EpiCSeg's model) for
+comparison, and `gaussian` for peak-score input. `chromstate.benchmark.algorithms.compare_algorithms`
+scores the count models by held-out likelihood on your data; the default is justified in
+[Tutorial 1 §7.2](docs/tutorials/01_simulation.md).
+
 States are named automatically from their emission profiles with the Roadmap
 Epigenomics vocabulary (TssA, TssBiv, ReprPC, Het, Quies, …). The rule that produced
 each name is recorded in `states.tsv`. **Names are a convenience, not a result.** With
@@ -532,6 +560,17 @@ In the CD8 T-cell data, adding intensity and dose raises held-out prediction of
 expression change by 0.020–0.025 Spearman ρ over occupancy-based features, and beats raw
 mark signal on two of three contrasts (tie on the third)
 ([results](analysis/scireports2025/RESULTS.md)).
+
+
+The composition-only API also reports drop-one scores and signed coefficients.
+
+```python
+chrom = features.table.set_index("gene_id")["chrom"]        # fold groups
+imp   = cs.composition_state_importance(genes[genes["sample"] == "TN"], log2_tpm_tn, groups=chrom)
+imp.table[["state", "rank", "perm_importance", "perm_lo", "perm_hi", "coef_std", "direction"]]
+dimp  = cs.state_importance_change(change, rna_lfc, groups=chrom)
+reps  = cs.compare_composition_representations(seg, features, log2_tpm_tn, sample="TN")
+```
 
 ### 5.9 Tracing a single gene
 
@@ -863,7 +902,8 @@ src/chromstate/      Python package
   predict.py         expression prediction and state ranking with a written report
   sc.py              single cells: metacells, pseudobulk datasets, bulk-to-scATAC/scRNA state transfer
   viz.py             figures (Nature style, PDF)
-  benchmark/         reimplemented competing models and metrics
+  importance.py      which states matter for expression: permutation, drop-one, coefficients
+  benchmark/         reimplemented competing models, algorithm selection, metrics
 R/chromstatR/        R interface (reticulate)
 tools/               harness for running external segmentation software
 analysis/            real-data analyses (scripts and results)

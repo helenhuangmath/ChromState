@@ -34,6 +34,7 @@ import shutil
 from typing import List, Optional
 
 import numpy as np
+import pandas as pd
 
 from ..core import Availability, ToolAdapter, ToolRun, probe_version, run_command
 from ..io_formats import export_chromhmm_binary, labels_from_segmentation_bed
@@ -71,7 +72,7 @@ class ChromHMMAdapter(ToolAdapter):
     key = "chromhmm"
     display_name = "ChromHMM (real, LearnModel)"
     kind = "external"
-    verified = True
+    verified = True  # run against ChromHMM 1.28 (jernst98/ChromHMM) on simulated bins, Oct 2026
     stands_for = "the actual published tool"
 
     def availability(self) -> Availability:
@@ -102,6 +103,9 @@ class ChromHMMAdapter(ToolAdapter):
         argv = [
             java_binary() or "java", "-mx4000M",
             "-jar", os.environ.get("CHROMHMM_JAR", "<$CHROMHMM_JAR-unset>"), "LearnModel",
+            # -noenrich: LearnModel otherwise runs enrichment against the assembly's
+            # bundled annotation and aborts when the bins (e.g. simulated chromosomes)
+            # do not match it -- after the segmentation and posteriors are written.
             "-b", str(bin_size), "-nobrowser", "-noimage", "-noenrich", "-printposterior",
             "-r", "200", "-s", str(seed),
         ]
@@ -192,6 +196,39 @@ class ChromHMMAdapter(ToolAdapter):
                    "activity scored post hoc from the posterior (toolbench.scores)"
                    + (f"; {self._init_note}" if getattr(self, "_init_note", "") else "")),
         )
+
+
+def scores_from_emissions(ds, outdir: str, run_id: str, posterior: Optional[np.ndarray]):
+    """Bivalency and activity scores for real ChromHMM, with the benchmark's shared formula.
+
+    ChromHMM's ``emissions_K.txt`` gives each state's presence probability per mark. As in
+    the ChromHMM-like baseline, these are mapped onto the count scale with each mark's mean
+    count among bins called present, and then the same state-level bivalency and activity
+    formulas are applied and weighted by the posterior. Returns ``(None, None)`` when the
+    emissions or posterior are unavailable, so the metrics report NaN rather than a guess.
+    """
+    from chromstate.benchmark.baselines import _state_activity, _state_bivalency
+    from chromstate.model.binarize import poisson_binarize
+
+    path = os.path.join(outdir, f"emissions_{run_id}.txt")
+    if posterior is None or not os.path.exists(path):
+        return None, None
+    try:
+        frame = pd.read_csv(path, sep="\t")
+    except Exception:
+        return None, None
+    frame = frame.set_index(frame.columns[0])
+    missing = [m for m in ds.marks if m not in frame.columns]
+    if missing or frame.shape[0] != posterior.shape[1]:
+        return None, None
+    probs = frame[list(ds.marks)].to_numpy(dtype=float)  # (K, M) presence probability
+    B = poisson_binarize(ds.X, control=getattr(ds, "control", None))
+    present_mean = np.array(
+        [ds.X[B[:, j] > 0, j].mean() if (B[:, j] > 0).any() else 0.0 for j in range(ds.n_marks)]
+    )
+    pseudo_means = probs * present_mean[None, :]
+    return (posterior @ _state_bivalency(pseudo_means, ds.marks),
+            posterior @ _state_activity(pseudo_means, ds.marks))
 
 
 def read_posterior(ds, outdir: str, n_states: int, run_id: Optional[str] = None) -> Optional[np.ndarray]:
