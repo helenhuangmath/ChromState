@@ -359,17 +359,18 @@ cs_gene_states <- function(segmentation, gtf, part = "promoter") {
 cs_state_importance <- function(gene_states, expression, sample = NULL, model = "ridge",
                                 n_permutations = 20, n_boot = 200, seed = 0) {
   m <- cs_module()
-  if (!is.null(sample)) gene_states <- gene_states[gene_states$sample == sample, ]
   chrom <- attr(gene_states, "chrom")
-  groups <- NULL
-  if (!is.null(chrom)) {
-    groups <- reticulate::r_to_py(setNames(as.character(chrom$chrom), chrom$gene_id))
-    groups <- reticulate::import("pandas")$Series(groups)
+  if (!is.null(sample)) gene_states <- gene_states[gene_states$sample == sample, ]
+  pandas <- reticulate::import("pandas", convert = FALSE)
+  groups <- if (is.null(chrom)) NULL else {
+    pandas$Series(as.character(chrom$chrom), index = as.character(chrom$gene_id))
   }
-  expr <- reticulate::import("pandas")$Series(as.numeric(expression), index = names(expression))
-  res <- m$composition_state_importance(reticulate::r_to_py(gene_states), expr, groups = groups,
-                            model = model, n_permutations = as_py_int(n_permutations),
-                            n_boot = as_py_int(n_boot), seed = as_py_int(seed))
+  expr <- pandas$Series(as.numeric(expression), index = names(expression))
+  res <- m$composition_state_importance(
+    gene_states, expr, groups = groups, model = model,
+    n_permutations = as_py_int(n_permutations), n_boot = as_py_int(n_boot),
+    seed = as_py_int(seed)
+  )
   list(table = as_df(res$table), cv_spearman = res$cv_spearman, cv_r2 = res$cv_r2,
        n_genes = res$n_genes, model = res$model, note = res$note)
 }

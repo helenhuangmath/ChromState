@@ -106,3 +106,19 @@ test_that("GRanges conversion shifts BED coordinates to 1-based", {
   expect_equal(as.integer(GenomicRanges::end(gr)), c(200L, 400L))
   expect_equal(S4Vectors::mcols(gr)$score, c(1.5, 2.5))
 })
+
+test_that("state importance aligns expression and chromosome groups by gene", {
+  skip_if_no_backend()
+  gene_ids <- sprintf("gene%03d", seq_len(60))
+  active <- seq(0.05, 0.95, length.out = length(gene_ids))
+  states <- data.frame(gene_id = gene_ids, sample = "control",
+                       Active = active, Quies = 1 - active)
+  attr(states, "chrom") <- data.frame(gene_id = gene_ids,
+                                      chrom = rep(paste0("chr", 1:5), each = 12))
+  expression <- setNames(active, gene_ids)
+
+  res <- cs_state_importance(states, rev(expression), sample = "control",
+                             n_permutations = 2, n_boot = 10)
+  expect_equal(res$n_genes, length(gene_ids))
+  expect_gt(res$cv_spearman, 0.9)
+})

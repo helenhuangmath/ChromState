@@ -561,7 +561,6 @@ expression change by 0.020–0.025 Spearman ρ over occupancy-based features, an
 mark signal on two of three contrasts (tie on the third)
 ([results](analysis/scireports2025/RESULTS.md)).
 
-
 The composition-only API also reports drop-one scores and signed coefficients.
 
 ```python
