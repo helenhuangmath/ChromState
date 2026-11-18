@@ -27,7 +27,7 @@ jobs:
         with: { path: docs/build/html }
 
   deploy:
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' && github.event.repository.has_pages
     needs: build
     runs-on: ubuntu-latest
     environment:

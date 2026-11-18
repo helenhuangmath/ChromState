@@ -1,6 +1,6 @@
 name: Release
-# Builds the sdist and wheel when a GitHub release is published and uploads them to PyPI
-# through trusted publishing (configure the "pypi" environment on PyPI first).
+# Build the sdist and wheel when a GitHub release is published. Enable PyPI
+# publishing with the PUBLISH_TO_PYPI repository variable after configuring its trusted publisher.
 on:
   release:
     types: [published]
@@ -19,6 +19,7 @@ jobs:
         with: { name: dist, path: dist }
 
   publish:
+    if: vars.PUBLISH_TO_PYPI == 'true'
     needs: build
     runs-on: ubuntu-latest
     environment: pypi
