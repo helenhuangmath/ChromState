@@ -35,13 +35,13 @@ from .dynamics import (
     benjamini_hochberg,
     differential_regions,
     moderated_t_test,
-    replicate_noise_floor,
 )
 from .model.core import Segmentation
 from .summary import state_tests
 
 
-def moderated_f_test(groups: Sequence[np.ndarray], prior_df: float = 4.0
+def moderated_f_test(groups: Sequence[np.ndarray], prior_df: float = 4.0,
+                     prior_mask: Optional[np.ndarray] = None,
                      ) -> Tuple[np.ndarray, np.ndarray, Tuple[float, float]]:
     """One-way ANOVA per feature with the within-group variance shrunk across features.
 
@@ -65,6 +65,8 @@ def moderated_f_test(groups: Sequence[np.ndarray], prior_df: float = 4.0
     df2 = n_total - g
     ms_within = ss_within / df2
     ok = np.isfinite(ms_within) & (ms_within > 0)
+    if prior_mask is not None and (ok & prior_mask).any():
+        ok &= prior_mask  # prior from the tested features only, as in moderated_t_test
     prior = float(np.median(ms_within[ok])) if ok.any() else 1.0
     shrunk = (prior_df * prior + df2 * ms_within) / (prior_df + df2)
     F = (ss_between / df1) / np.maximum(shrunk, 1e-12)
@@ -198,9 +200,11 @@ def region_state_tests(
     states within a region. ``significant`` requires ``q < fdr`` and
     ``|delta| >= min_delta`` (in share units, 0-1).
 
-    A state that is essentially absent from a region in *both* groups (mean share below
-    ``min_share`` on each side) is not tested: its logit shares sit at the clipping
-    floor in every replicate, the t-statistic is 0 by construction and the p-value 1.
+    Shares are tested on the empirical-logit scale of the region's own bin count (see
+    :func:`chromstate.dynamics._logit`). A state that is essentially absent from a region
+    in *both* groups (mean share below ``min_share`` and below half a bin, ``0.5 / n``,
+    on each side) is not tested: its shares are below what the region can resolve, the
+    t-statistic is 0 by construction and the p-value 1.
     Those rows get ``tested = False`` and NaN p and q, so they neither inflate the
     multiple-testing burden nor pile up at p = 1 in a calibration plot.
     """
@@ -211,6 +215,8 @@ def region_state_tests(
     occ_a = np.stack([_region_occupancy(seg, s, members) for s in group_a], axis=1)  # (R, na, K)
     occ_b = np.stack([_region_occupancy(seg, s, members) for s in group_b], axis=1)
     can_test = occ_a.shape[1] >= 2 and occ_b.shape[1] >= 2
+    sizes = np.maximum(np.array([len(m) for m in members]), 1)
+    floor = np.maximum(min_share, 0.5 / sizes)
     rows = []
     names = regions["name"].to_numpy() if "name" in regions.columns else np.array(
         [f"{c}:{s}-{e}" for c, s, e in zip(regions["chrom"], regions["start"], regions["end"])])
@@ -222,8 +228,9 @@ def region_state_tests(
                               "state": lbl, "share_a": ma, "share_b": mb, "delta": mb - ma,
                               "log2_ratio": np.log2((mb + 1e-3) / (ma + 1e-3))})
         if can_test:
-            t, p, df = moderated_t_test(_logit(a), _logit(b), prior_df=prior_df)
-            informative = (ma >= min_share) | (mb >= min_share)
+            informative = (ma >= floor) | (mb >= floor)
+            t, p, df = moderated_t_test(_logit(a, n_bins=sizes), _logit(b, n_bins=sizes),
+                                        prior_df=prior_df, prior_mask=informative)
             t = np.where(informative, t, np.nan)
             p = np.where(informative, p, np.nan)
             q = np.full(len(p), np.nan)
@@ -432,14 +439,26 @@ def differential_report(
         occ = {c: np.stack([_region_occupancy(seg, s, members) for s in reps], axis=1)
                for c, reps in replicated.items()}
         rows = []
+        sizes = np.maximum(np.array([len(m) for m in members]), 1)
+        floor = np.maximum(0.01, 0.5 / sizes)
         for k, lbl in enumerate(seg.labels):
-            F, p, (df1, df2) = moderated_f_test([_logit(occ[c][:, :, k]) for c in replicated],
-                                                prior_df=prior_df)
+            means = np.stack([occ[c][:, :, k].mean(axis=1) for c in replicated], axis=1)
+            # as in region_state_tests: a state absent from the region in every condition
+            # is not tested
+            informative = means.max(axis=1) >= floor
+            F, p, (df1, df2) = moderated_f_test(
+                [_logit(occ[c][:, :, k], n_bins=sizes) for c in replicated], prior_df=prior_df,
+                prior_mask=informative)
+            p = np.where(informative, p, np.nan)
+            q = np.full(len(p), np.nan)
+            if informative.any():
+                q[informative] = benjamini_hochberg(p[informative])
             frame = pd.DataFrame({"name": regions["name"], "chrom": regions["chrom"],
                                   "start": regions["start"], "end": regions["end"], "state": lbl,
-                                  "F": F, "pvalue": p, "qvalue": benjamini_hochberg(p)})
-            for c in replicated:
-                frame[f"share_{c}"] = occ[c][:, :, k].mean(axis=1)
+                                  "F": np.where(informative, F, np.nan), "pvalue": p, "qvalue": q})
+            for j, c in enumerate(replicated):
+                frame[f"share_{c}"] = means[:, j]
+            frame["max_delta"] = means.max(axis=1) - means.min(axis=1)
             rows.append(frame)
         anova = pd.concat(rows, ignore_index=True)
         anova["significant"] = anova["qvalue"] < fdr

@@ -281,8 +281,8 @@ def kmeans_clusters(comp, marks, enh, expr, de, names, universe):
 
 
 def fig_poised(table, shift, lists):
-    fig, axes = plt.subplots(1, 2, figsize=(ns.DOUBLE, 62 * ns.MM),
-                             gridspec_kw={"width_ratios": [1, 1.25], "wspace": 0.35})
+    fig, axes = plt.subplots(1, 2, figsize=(ns.DOUBLE, 72 * ns.MM),
+                             gridspec_kw={"width_ratios": [1, 1.25], "wspace": 0.4})
     ax = axes[0]
     w = 0.38
     for i, (cond, colour) in enumerate((("TMEM", ns.CONDITION_COLORS["Arm"]),
@@ -294,8 +294,9 @@ def fig_poised(table, shift, lists):
                                                  100 * (t["ci_hi"] - t["frac_up"])],
                     fmt="none", ecolor="black", elinewidth=0.5, capsize=1.2)
     n = table.loc[table["later_state"] == "TEX"].set_index("tn_promoter_class").loc[CLASSES, "n_silent_genes"]
-    ax.set_xticks(range(len(CLASSES)), [f"{c.capitalize()}\n(n = {n[c]:,})" for c in CLASSES])
-    ax.set_xlabel("TN promoter state of genes silent in TN")
+    ax.set_xticks(range(len(CLASSES)), [c.capitalize() for c in CLASSES])
+    print("Fig8a genes silent in TN per promoter class:", {c: int(n[c]) for c in CLASSES})
+    ax.set_xlabel("TN promoter state (genes silent in TN)")
     ax.set_ylabel("Genes switched on later (%)")
     ax.legend(loc="upper right")
     ns.panel_label(ax, "a")
@@ -306,24 +307,24 @@ def fig_poised(table, shift, lists):
                linewidths=0, rasterized=True)
     sil, act = lists[("Cl13", "silencing")], lists[("Cl13", "activation")]
     ax.scatter(sil["promoter_shift"], sil["rna_log2fc"], s=2.5, color=CLASS_COLORS["poised"],
-               linewidths=0, rasterized=True, label="Promoter silenced, RNA still high")
+               linewidths=0, rasterized=True, label="Promoter silenced, RNA high")
     ax.scatter(act["promoter_shift"], act["rna_log2fc"], s=2.5, color=CLASS_COLORS["active"],
-               linewidths=0, rasterized=True, label="Promoter activated, RNA not up")
+               linewidths=0, rasterized=True, label="Promoter activated, RNA flat")
     offsets = {"Tcf7": (6, -6), "S1pr1": (6, 4), "Klrg1": (-14, 6), "Tox2": (-22, 6), "Pdcd1": (6, 6)}
     for g, off in offsets.items():
         r = s.loc[s["name"] == g]
         if len(r):
             r = r.iloc[0]
             ax.annotate(g, (r["promoter_shift"], np.clip(r["rna_log2fc"], -10, 10)), xytext=off,
-                        textcoords="offset points", fontsize=5, fontstyle="italic",
+                        textcoords="offset points", fontsize=ns.FS, fontstyle="italic",
                         arrowprops={"arrowstyle": "-", "lw": 0.3, "color": "black"})
     ax.axhline(0, color="0.6", lw=0.4)
     ax.axvline(0, color="0.6", lw=0.4)
-    ax.set_xlabel("Promoter shift, TEX vs TN\n(gain in active minus gain in poised + repressed share)")
+    ax.set_xlabel("Promoter shift towards active, TEX vs TN")
     ax.set_ylabel("RNA log2 fold change, TEX vs TN")
     ax.legend(loc="lower right", markerscale=3, handletextpad=0.2)
     ns.panel_label(ax, "b")
-    ns.save(fig, FIG, "Fig8_poised_genes")
+    ns.save(fig, FIG, "Fig8_poised_genes", groups={"a_poised_vs_silent": "a", "b_chromatin_vs_rna": "b"})
 
 
 def fig_programs(lab, blocks, summary, expr):
@@ -342,10 +343,10 @@ def fig_programs(lab, blocks, summary, expr):
     panels += [("\u0394 Enhancer\ninput", E.to_numpy(), ns.DIVERGING, -2.5, 2.5),
                ("RNA\n(gene-centred)", R.to_numpy(), "PuOr_r", -3, 3)]
 
-    fig = plt.figure(figsize=(ns.DOUBLE, 150 * ns.MM))
+    fig = plt.figure(figsize=(ns.DOUBLE * 1.3, 150 * ns.MM))
     gs = fig.add_gridspec(2, len(panels) + 2, height_ratios=[1, 0.025], hspace=0.08, wspace=0.12,
-                          width_ratios=[0.25] + [1] * len(panels) + [2.4], left=0.03, right=0.99,
-                          top=0.90, bottom=0.05)
+                          width_ratios=[0.25] + [1] * len(panels) + [2.2], left=0.03, right=0.99,
+                          top=0.90, bottom=0.07)
     bar = fig.add_subplot(gs[0, 0])
     cluster_cmap = plt.get_cmap("tab10" if N_CLUSTERS <= 10 else "tab20")
     bar.imshow(lab.loc[order].to_numpy()[:, None], aspect="auto", cmap=cluster_cmap,
@@ -360,9 +361,9 @@ def fig_programs(lab, blocks, summary, expr):
     for j, (title, data, cmap, lo, hi) in enumerate(panels):
         ax = fig.add_subplot(gs[0, j + 1])
         images[title] = ax.imshow(data, aspect="auto", cmap=cmap, vmin=lo, vmax=hi, interpolation="nearest")
-        ax.set_title(title, fontsize=5.5, rotation=0)
+        ax.set_title(title, fontsize=6.5, rotation=0)
         ticks = ["M", "E"] if data.shape[1] == 2 else ["N", "M", "E"]
-        ax.set_xticks(range(len(ticks)), ticks, fontsize=5)
+        ax.set_xticks(range(len(ticks)), ticks, fontsize=6)
         ax.xaxis.tick_top()
         ax.set_yticks([])
         for b in bounds[1:-1]:
@@ -385,25 +386,24 @@ def fig_programs(lab, blocks, summary, expr):
     for i in range(len(pos) - 2, -1, -1):
         pos[i] = min(pos[i], pos[i + 1] - gap)
     for (_, r), mid, y in zip(summary.iterrows(), mids, pos):
-        genes = textwrap.fill(r["key_genes"] or r["other_examples"], 48)
-        label = (f"{r['cluster']}  {r['pattern']}   n = {r['n_genes']:,}\n"
-                 f"RNA {r['median_log2_expr_TN']:.1f} > {r['median_log2_expr_TMEM']:.1f} > "
-                 f"{r['median_log2_expr_TEX']:.1f}; {r['pct_up_TEX']:.0f}% up in TEX\n{genes}")
+        # cluster name and a few landmark genes; sizes and medians are in the programs table
+        genes = ", ".join(str(r["key_genes"] or r["other_examples"]).split(", ")[:5])
+        label = f"{r['cluster']}  {r['pattern']}\n{textwrap.fill(genes, 44)}"
         txt.plot([0, 0.05], [mid, y], color="black", lw=0.3, clip_on=False)
-        txt.text(0.07, y, label, va="center", ha="left", fontsize=4.8, linespacing=1.15)
+        txt.text(0.07, y, label, va="center", ha="left", fontsize=6.5, linespacing=1.15)
 
     for j, (key, label) in enumerate([("Active\nshare", "State share"),
-                                      ("\u0394 H3K4me3", "Change from TN (SD units)"),
-                                      ("RNA\n(gene-centred)", "RNA, log2 minus gene mean")]):
+                                      ("\u0394 H3K4me3", "Change from TN (SD)"),
+                                      ("RNA\n(gene-centred)", "RNA (log2, centred)")]):
         cax = fig.add_subplot(gs[1, 1 + 3 * j: 3 + 3 * j])
         cb = fig.colorbar(images[key], cax=cax, orientation="horizontal")
-        cb.set_label(label, fontsize=5)
-        cb.ax.tick_params(labelsize=5, width=0.4, length=1.5)
+        cb.set_label(label, fontsize=6.5)
+        cb.ax.tick_params(labelsize=6, width=0.4, length=1.5)
         cb.outline.set_linewidth(0.4)
-    fig.text(0.03, 0.985, f"{len(order):,} genes clustered on promoter state, promoter mark "
-             "strength change and distal enhancer input change (k-means, k = "
-             f"{N_CLUSTERS}); N = TN, M = TMEM, E = TEX; \u0394 = change from TN", fontsize=5.5)
-    ns.save(fig, FIG, "Fig9_chromatin_programs")
+    # Legend (not drawn): genes clustered on promoter state, promoter mark strength change and
+    # distal enhancer input change (k-means); N = TN, M = TMEM, E = TEX; delta = change from TN.
+    print(f"Fig9: {len(order):,} genes, k = {N_CLUSTERS}")
+    ns.save(fig, FIG, "Fig9_chromatin_programs", groups=False)
 
 
 def main() -> None:

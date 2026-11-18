@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "chromstate"
-version = "0.2.0"
+version = "1.1.0"
 description = "Quantitative chromatin state analysis: soft state composition, bivalency scoring, mark attribution, and state dynamics"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -12,9 +12,17 @@ license = { text = "MIT" }
 authors = [{ name = "Hua Huang" }]
 keywords = ["epigenomics", "chromatin", "ChIP-seq", "CUT&RUN", "ATAC-seq", "HMM"]
 classifiers = [
+  "Development Status :: 5 - Production/Stable",
   "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: POSIX :: Linux",
+  "Operating System :: MacOS",
   "Topic :: Scientific/Engineering :: Bio-Informatics",
   "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
 ]
 dependencies = [
   "numpy>=1.21",
@@ -28,14 +36,28 @@ dependencies = [
 bam = ["pysam>=0.19"]
 bigwig = ["pyBigWig>=0.3"]
 anndata = ["anndata>=0.8"]
+fast = ["numba>=0.56"]
 dev = ["pytest>=7", "pytest-cov", "ruff", "mypy"]
-all = ["pysam>=0.19", "pyBigWig>=0.3", "anndata>=0.8"]
+docs = ["sphinx>=7", "myst-parser>=2", "sphinx-rtd-theme>=2"]
+all = ["pysam>=0.19", "pyBigWig>=0.3", "anndata>=0.8", "numba>=0.56"]
+
+[project.urls]
+Homepage = "https://github.com/helenhuangmath/ChromState"
+Documentation = "https://helenhuangmath.github.io/ChromState/"
+Issues = "https://github.com/helenhuangmath/ChromState/issues"
+Changelog = "https://github.com/helenhuangmath/ChromState/blob/main/CHANGELOG.md"
 
 [project.scripts]
 chromstate = "chromstate.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/chromstate"]
+
+[tool.hatch.build.targets.sdist]
+# source, tests and the text documentation; figures and analysis outputs stay in the repository
+include = ["src", "tests", "tools", "docs/source", "docs/tutorials", "docs/*.md",
+           "README.md", "LICENSE", "CHANGELOG.md", "CITATION.cff", "CONTRIBUTING.md",
+           "CODE_OF_CONDUCT.md", "environment.yml", "pyproject.toml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

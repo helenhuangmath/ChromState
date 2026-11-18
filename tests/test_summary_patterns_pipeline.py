@@ -271,8 +271,8 @@ def test_state_tests_find_the_perturbed_states(fitted):
     assert {"delta_pct", "delta_lo", "delta_hi", "p_rep", "q_rep", "p_block", "q_block"} <= set(tab.columns)
     assert tab["p_rep"].notna().all()  # two replicates a side
     t = tab.set_index("state")
-    active = [l for l in seg.labels if l.startswith("TssA")]
-    polycomb = [l for l in seg.labels if l.startswith("ReprPC")]
+    active = [lbl for lbl in seg.labels if lbl.startswith("TssA")]
+    polycomb = [lbl for lbl in seg.labels if lbl.startswith("ReprPC")]
     assert (t.loc[active, "delta_lo"] > 0).all()
     assert (t.loc[polycomb, "delta_hi"] < 0).all()
     assert (t["delta_lo"] <= t["delta_pct"]).all() and (t["delta_pct"] <= t["delta_hi"]).all()
@@ -285,7 +285,14 @@ def test_state_tests_find_the_perturbed_states(fitted):
 
 
 def test_score_tensor_matches_in_memory_scores(tmp_path):
-    from chromstate.resolution import ScoreTensor, coarsen_dataset, copy_size_factors, decode_at_resolution, decode_to_tensor, state_scores
+    from chromstate.resolution import (
+        ScoreTensor,
+        coarsen_dataset,
+        copy_size_factors,
+        decode_at_resolution,
+        decode_to_tensor,
+        state_scores,
+    )
 
     fine, truth = _fine_sim(seed=9)
     coarse = coarsen_dataset(fine, 20)
@@ -301,7 +308,7 @@ def test_score_tensor_matches_in_memory_scores(tmp_path):
     sub = scores.loc[(scores["sample"] == "b1") & (scores["chrom"] == "chr2")]
     block = t2.window("chr2", 1000, 3000, sample="b1")
     expect = sub.loc[(sub["start"] >= 1000) & (sub["start"] < 3000),
-                     [f"score_{l}" for l in seg.labels]].to_numpy()
+                     [f"score_{lbl}" for lbl in seg.labels]].to_numpy()
     assert block.shape == expect.shape
     assert np.abs(block.astype(int) - expect.astype(int)).max() <= 1
     # region means and the summary agree with the in-memory summary

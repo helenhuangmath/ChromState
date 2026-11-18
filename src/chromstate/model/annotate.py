@@ -161,6 +161,30 @@ def full_state_name(label: str) -> str:
     return f"{full} ({suffix})" if suffix else full
 
 
+#: Families from the most active to the quietest: the row order for figures.
+STATE_DISPLAY_RANK = ["TssA", "TssFlnk", "TssBiv", "BivFlnk", "EnhA", "EnhWk", "EnhBiv", "Tx", "TxWk",
+                      "ReprPC", "ReprPCWk", "Het", "HetWk", "ZNF/Rpts", "Quies", "Unknown"]
+
+
+def display_order(labels) -> list:
+    """State labels sorted for display: active transcription start sites first, then
+    flanking and bivalent promoters, enhancers, transcription, Polycomb, heterochromatin,
+    and quiescent states last. States of one family keep their number order; labels that
+    are not recognised mnemonics go after the named families, before the quiescent ones,
+    in the order given.
+    """
+    labels = [str(lbl) for lbl in labels]
+    quiet = STATE_DISPLAY_RANK.index("Quies")
+
+    def key(item):
+        i, lbl = item
+        base, _, suffix = lbl.partition("_")
+        rank = STATE_DISPLAY_RANK.index(base) if base in STATE_DISPLAY_RANK else quiet - 0.5
+        return (rank, int(suffix) if suffix.isdigit() else 0, i)
+
+    return [lbl for _, lbl in sorted(enumerate(labels), key=key)]
+
+
 def canonical_mark(name: str) -> str:
     key = name.strip().lower().replace("-", "").replace("_", "")
     return MARK_ALIASES.get(key, name)

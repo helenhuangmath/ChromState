@@ -8,40 +8,47 @@ Each figure answers one question about the differential report:
 ``plot_replicate_concordance``    replicate-versus-replicate occupancy against condition-versus-condition
 ``plot_change_ecdf``              the change statistic for replicate pairs against condition pairs
 ``plot_region_state_volcano``     which state moved and by how much, per region (volcano by state)
-``plot_anova_volcano``            three or more conditions: F against q per region and state
+``plot_anova_volcano``            three or more conditions: largest difference against q per region and state
 
 The omnibus per-region volcano with the noise floor is :func:`chromstate.viz.plot_change_volcano`.
 """
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, Optional, Sequence, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
 from . import viz
-from .viz import FS_CELL, FS_LABEL, FS_TICK, GRID, INK, WIDTH_DOUBLE, WIDTH_MID, WIDTH_SINGLE, _new_fig, _title
+from .viz import (
+    FS_CELL,
+    FS_LABEL,
+    FS_TICK,
+    INK,
+    WIDTH_DOUBLE,
+    WIDTH_MID,
+    WIDTH_SINGLE,
+    _new_fig,
+    _title,
+)
 
 GAIN = "#AE231B"
 LOSS = "#395493"
 NEUTRAL = "#9E9E9E"
 
 
-def _signed_logq(frame: pd.DataFrame, cap: float = 6.0) -> np.ndarray:
-    q = np.clip(frame["qvalue"].to_numpy(dtype=float), 10 ** (-cap), 1.0)
-    return -np.log10(q) * np.sign(frame["delta"].to_numpy(dtype=float))
-
-
 def plot_region_state_heatmap(region_states: pd.DataFrame, contrast: Optional[str] = None,
                               top: int = 40, seg=None, palette: str = viz.DEFAULT_PALETTE,
                               figsize=None):
-    """Signed -log10 q per region (rows) and state (columns): red = gain, blue = loss.
+    """Change in share (percentage points) per region (rows) and state (columns): red =
+    gain, blue = loss; a dot marks q < 0.05.
 
-    Rows are the ``top`` regions by omnibus evidence (smallest q over states), ordered by
-    hierarchical clustering of the signed profile, so regions that move the same way sit
-    together. Cells with q above 0.5 are left white; the dot marks q < 0.05.
+    Rows are the ``top`` regions by evidence (smallest q over states, ties broken by the
+    size of the change), ordered by hierarchical clustering so regions that move the same
+    way sit together. Colour is the effect size and not the q-value: q saturates for
+    every clear change, which would paint the whole column one colour.
     """
     rs = region_states
     if contrast is not None:
@@ -49,10 +56,13 @@ def plot_region_state_heatmap(region_states: pd.DataFrame, contrast: Optional[st
     if "qvalue" not in rs.columns:
         raise ValueError("region_states has no qvalue column (no replicates?)")
     states = list(pd.unique(rs["state"]))
-    mat = rs.assign(v=_signed_logq(rs)).pivot_table(index="name", columns="state", values="v", dropna=False)
+    mat = rs.assign(v=100 * rs["delta"].astype(float)).pivot_table(
+        index="name", columns="state", values="v", dropna=False)
     mat = mat.reindex(columns=states)  # a state never tested (all-NaN q) would otherwise be dropped
-    qmin = rs.groupby("name")["qvalue"].min()
-    keep = qmin.sort_values().index[:top]
+    qmat = rs.pivot_table(index="name", columns="state", values="qvalue", dropna=False).reindex(columns=states)
+    rank = pd.DataFrame({"q": rs.groupby("name")["qvalue"].min(),
+                         "d": rs.groupby("name")["delta"].apply(lambda v: -float(np.abs(v).max()))})
+    keep = rank.sort_values(["q", "d"]).index[:top]
     mat = mat.reindex(keep)
     if len(mat) > 2:
         from scipy.cluster.hierarchy import leaves_list, linkage
@@ -62,11 +72,10 @@ def plot_region_state_heatmap(region_states: pd.DataFrame, contrast: Optional[st
     figsize = figsize or (WIDTH_MID, min(0.09 * len(mat) + 1.2, 7.0))
     fig, ax = _new_fig(*figsize)
     ax.grid(False)
-    vmax = max(float(np.nanmax(np.abs(mat.to_numpy()))), 1.3)
+    vmax = max(float(np.nanmax(np.abs(mat.to_numpy()))), 5.0)
     data = mat.to_numpy()
-    shown = np.where(np.abs(data) < 0.3, np.nan, data)  # q > 0.5 stays white
-    im = ax.imshow(shown, cmap="RdBu_r", vmin=-vmax, vmax=vmax, aspect="auto", interpolation="nearest")
-    sig = np.abs(data) > -np.log10(0.05)
+    im = ax.imshow(data, cmap="RdBu_r", vmin=-vmax, vmax=vmax, aspect="auto", interpolation="nearest")
+    sig = qmat.reindex(mat.index).to_numpy(dtype=float) < 0.05
     yy, xx = np.nonzero(sig)
     ax.scatter(xx, yy, s=3, color=INK, linewidths=0, zorder=3)
     ax.set_xticks(range(len(states)))
@@ -78,10 +87,9 @@ def plot_region_state_heatmap(region_states: pd.DataFrame, contrast: Optional[st
     ax.set_yticklabels([str(n)[:18] for n in mat.index], fontsize=FS_CELL)
     ax.tick_params(axis="y", length=1.5, pad=1.5)
     cb = fig.colorbar(im, ax=ax, fraction=0.03, pad=0.02)
-    cb.set_label("signed −log10 q  (red gain, blue loss)", fontsize=FS_LABEL)
+    cb.set_label("Change in share (points)", fontsize=FS_LABEL)
     cb.ax.tick_params(labelsize=FS_TICK)
-    _title(ax, f"Which states change, region by region{' · ' + contrast if contrast else ''}",
-           f"top {len(mat)} regions by evidence; dot = q < 0.05")
+    _title(ax, (contrast or "").replace("_vs_", " → "))
     fig.tight_layout()
     return fig
 
@@ -98,14 +106,8 @@ def plot_state_gain_loss(states: pd.DataFrame, seg=None, palette: str = viz.DEFA
         viz._style_axes(ax, grid_axis="x")
         sub = states.loc[states["contrast"] == c].reset_index(drop=True)
         y = np.arange(len(sub))
-        ax.barh(y, sub["n_sig_gain"], color=GAIN, edgecolor=INK, linewidth=0.3, zorder=3, label="regions gaining")
-        ax.barh(y, -sub["n_sig_loss"], color=LOSS, edgecolor=INK, linewidth=0.3, zorder=3, label="regions losing")
-        ax2 = ax.twiny()
-        ax2.scatter(100 * sub["mean_delta"], y, color=INK, s=8, zorder=4, label="mean change (pp)")
-        lim = max(1.0, float(np.abs(100 * sub["mean_delta"]).max()) * 1.3)
-        ax2.set_xlim(-lim, lim)
-        ax2.tick_params(labelsize=FS_TICK)
-        ax2.set_xlabel("mean change over regions (percentage points)", fontsize=FS_LABEL)
+        ax.barh(y, sub["n_sig_gain"], color=GAIN, linewidth=0, zorder=3, label="Gain")
+        ax.barh(y, -sub["n_sig_loss"], color=LOSS, linewidth=0, zorder=3, label="Loss")
         ax.axvline(0, color=INK, linewidth=0.5)
         ax.set_yticks(y)
         ax.set_yticklabels(viz.state_labels(sub["state"]), fontsize=FS_TICK)
@@ -114,11 +116,15 @@ def plot_state_gain_loss(states: pd.DataFrame, seg=None, palette: str = viz.DEFA
             tick.set_color(colors[s])
         m = max(1, int(max(sub["n_sig_gain"].max(), sub["n_sig_loss"].max())))
         ax.set_xlim(-1.15 * m, 1.15 * m)
-        ax.set_xlabel("regions significant at FDR (loss ← → gain)", fontsize=FS_LABEL)
-        ax.set_title(c.replace("_vs_", " → "), fontsize=viz.FS_TITLE, loc="left", pad=22)
+        ax.set_xticks(ax.get_xticks())
+        ax.set_xticklabels([f"{abs(v):g}" for v in ax.get_xticks()])
+        ax.set_xlim(-1.15 * m, 1.15 * m)
+        ax.set_xlabel("Significant regions", fontsize=FS_LABEL)
+        ax.set_title(c.replace("_vs_", " → "), fontsize=viz.FS_TITLE, loc="left")
+        if ax is not axes[0][0]:
+            ax.set_yticklabels([])
         if ax is axes[0][0]:
             ax.legend(fontsize=FS_CELL, loc="lower right", frameon=False)
-    fig.suptitle("Regions significant at the FDR (bars) and mean change (dots)", fontsize=viz.FS_SUBTITLE, y=1.02)
     fig.tight_layout()
     return fig
 
@@ -140,24 +146,21 @@ def plot_pvalue_histograms(observed: pd.DataFrame, permuted: Optional[pd.DataFra
         ax = axes[i // ncol][i % ncol]
         viz._style_axes(ax, grid_axis="y")
         p = observed.loc[observed["state"] == s, "pvalue"].dropna().to_numpy()
-        n_untested = int((observed["state"] == s).sum() - len(p))
-        ax.hist(p, bins=edges, color=GAIN, alpha=0.75, density=True, zorder=3, label="observed")
+        ax.hist(p, bins=edges, color=GAIN, alpha=0.75, density=True, zorder=3, label="Observed")
         if permuted is not None:
             pp = permuted.loc[permuted["state"] == s, "pvalue"].dropna().to_numpy()
             ax.hist(pp, bins=edges, histtype="step", color=INK, linewidth=0.8, density=True, zorder=4,
-                    label="permuted labels")
+                    label="Permuted")
         ax.axhline(1.0, color=NEUTRAL, linewidth=0.5, linestyle="--")
-        ax.set_title(f"{s}   n = {len(p):,}" + (f" ({n_untested:,} absent)" if n_untested else ""),
-                     fontsize=FS_LABEL, loc="left")
+        ax.set_title(viz.state_labels([s])[0], fontsize=FS_LABEL, loc="left")
         ax.tick_params(labelsize=FS_TICK)
         if i // ncol == nrow - 1:
-            ax.set_xlabel("p-value", fontsize=FS_LABEL)
+            ax.set_xlabel("P value", fontsize=FS_LABEL)
         if i % ncol == 0:
-            ax.set_ylabel("density", fontsize=FS_LABEL)
+            ax.set_ylabel("Density", fontsize=FS_LABEL)
     for j in range(n, nrow * ncol):
         axes[j // ncol][j % ncol].axis("off")
     axes[0][0].legend(fontsize=FS_CELL, frameon=False, loc="upper left", bbox_to_anchor=(0.0, 0.88))
-    fig.suptitle("Test calibration: observed versus label-permuted p-values", fontsize=viz.FS_TITLE, y=1.0)
     fig.tight_layout()
     return fig
 
@@ -190,8 +193,8 @@ def plot_replicate_concordance(seg, regions: pd.DataFrame, state: str, replicate
     c, d = occ[condition_pair[0]][:, k], occ[condition_pair[1]][:, k]
     figsize = figsize or (WIDTH_DOUBLE, WIDTH_SINGLE * 0.9)
     fig, axes = plt.subplots(1, 2, figsize=figsize, facecolor=viz.SURFACE)
-    for ax, (x, y, col, lab) in zip(axes, [(a, b, NEUTRAL, f"{replicate_pair[0]} vs {replicate_pair[1]} (replicates)"),
-                                           (c, d, GAIN, f"{condition_pair[0]} vs {condition_pair[1]} (conditions)")]):
+    for ax, (x, y, col, lab, names) in zip(axes, [(a, b, NEUTRAL, "Replicates", replicate_pair),
+                                                  (c, d, GAIN, "Conditions", condition_pair)]):
         viz._style_axes(ax, grid_axis=None)
         ok = np.isfinite(x) & np.isfinite(y)
         ax.scatter(x[ok], y[ok], s=5, color=col, alpha=0.6, linewidths=0, zorder=3)
@@ -200,17 +203,16 @@ def plot_replicate_concordance(seg, regions: pd.DataFrame, state: str, replicate
             t = float(noise_floor.threshold)
             xx = np.linspace(0, 1, 50)
             ax.fill_between(xx, np.clip(xx - t, 0, 1), np.clip(xx + t, 0, 1), color=LOSS, alpha=0.12,
-                            linewidth=0, zorder=2, label=f"noise floor ±{t:.2f}")
-            out = np.abs(x[ok] - y[ok]) > t
-            ax.text(0.03, 0.93, f"{out.mean() * 100:.1f}% of regions outside the floor", transform=ax.transAxes,
-                    fontsize=FS_CELL, color=INK)
+                            linewidth=0, zorder=2, label="Noise floor")
         rho = pd.Series(x[ok]).corr(pd.Series(y[ok]), method="spearman") if ok.sum() > 2 else np.nan
-        ax.set_xlabel(f"{state} share, first sample", fontsize=FS_LABEL)
-        ax.set_ylabel(f"{state} share, second sample", fontsize=FS_LABEL)
+        ax.set_xlabel(f"{state} share, {names[0]}", fontsize=FS_LABEL)
+        ax.set_ylabel(f"{state} share, {names[1]}", fontsize=FS_LABEL)
+        if np.isfinite(rho):
+            ax.text(0.04, 0.93, f"ρ = {rho:.2f}", transform=ax.transAxes, fontsize=FS_CELL, color=INK)
         ax.set_xlim(0, 1)
         ax.set_ylim(0, 1)
         ax.tick_params(labelsize=FS_TICK)
-        _title(ax, lab, f"Spearman ρ = {rho:.3f}, n = {int(ok.sum()):,} regions")
+        _title(ax, lab)
         if noise_floor is not None:
             ax.legend(fontsize=FS_CELL, frameon=False, loc="lower right")
     fig.tight_layout()
@@ -236,12 +238,12 @@ def plot_change_ecdf(seg, groups: Dict[str, Sequence[str]], regions: pd.DataFram
     fig, ax = _new_fig(*figsize)
     viz._style_axes(ax, grid_axis="both")
     first = True
-    for c, reps in groups.items():
+    for reps in groups.values():
         for i in range(len(reps)):
             for j in range(i + 1, len(reps)):
                 d = tv(reps[i], reps[j])
                 ax.step(d, np.arange(1, len(d) + 1) / len(d), color=NEUTRAL, linewidth=0.7,
-                        label="replicate pairs" if first else None, zorder=3)
+                        label="Replicate pairs" if first else None, zorder=3)
                 first = False
     palette = plt.get_cmap("tab10")
     for n, (c, reps) in enumerate([(c, r) for c, r in groups.items() if c != reference]):
@@ -254,13 +256,11 @@ def plot_change_ecdf(seg, groups: Dict[str, Sequence[str]], regions: pd.DataFram
                 first_c = False
     if noise_floor is not None:
         ax.axvline(float(noise_floor.threshold), color=LOSS, linewidth=0.7, linestyle="--",
-                   label=f"noise floor {noise_floor.threshold:.2f}")
-    ax.set_xlabel("total-variation distance of region composition", fontsize=FS_LABEL)
-    ax.set_ylabel("fraction of regions", fontsize=FS_LABEL)
+                   label="Noise floor")
+    ax.set_xlabel("Change in state composition", fontsize=FS_LABEL)
+    ax.set_ylabel("Fraction of regions", fontsize=FS_LABEL)
     ax.set_xlim(0, 1)
     ax.legend(fontsize=FS_CELL, frameon=False, loc="lower right")
-    _title(ax, "How much change replicates produce, against conditions",
-           f"{len(regions):,} regions; one curve per sample pair")
     fig.tight_layout()
     return fig
 
@@ -284,13 +284,13 @@ def plot_region_state_volcano(region_states: pd.DataFrame, contrast: Optional[st
     fig, ax = _new_fig(*figsize)
     viz._style_axes(ax, grid_axis="both")
     x = 100 * rs["delta"].to_numpy(dtype=float)
-    y = -np.log10(np.clip(rs["qvalue"].to_numpy(dtype=float), 1e-12, 1))
+    y = -np.log10(np.clip(rs["qvalue"].to_numpy(dtype=float), 1e-300, 1))
     sig = rs["significant"].to_numpy(dtype=bool) if "significant" in rs.columns else (rs["qvalue"] < fdr).to_numpy()
     for s_ in states:
         m = (rs["state"] == s_).to_numpy()
         ax.scatter(x[m & ~sig], y[m & ~sig], s=3, color=colors[s_], alpha=0.25, linewidths=0, zorder=2)
         ax.scatter(x[m & sig], y[m & sig], s=6, color=colors[s_], alpha=0.9, linewidths=0, zorder=3,
-                   label=f"{viz.state_labels([s_])[0]} ({int((m & sig).sum())})")
+                   label=viz.state_labels([s_])[0])
     ax.axhline(-np.log10(fdr), color=INK, linewidth=0.5, linestyle="--")
     if min_delta > 0:
         for v in (-100 * min_delta, 100 * min_delta):
@@ -298,49 +298,47 @@ def plot_region_state_volcano(region_states: pd.DataFrame, contrast: Optional[st
     ax.axvline(0, color=NEUTRAL, linewidth=0.4)
     top = rs.loc[sig].assign(_y=y[sig], _x=x[sig]).sort_values(["_y", "_x"], ascending=False).head(label_top)
     viz._stagger_labels(ax, [(r["_x"], r["_y"], str(r["name"])) for _, r in top.iterrows()], fontsize=FS_CELL)
-    ax.set_xlabel("change in state share (percentage points)", fontsize=FS_LABEL)
-    ax.set_ylabel("−log10 q (BH within state)", fontsize=FS_LABEL)
+    ax.set_xlabel("Change in state share (points)", fontsize=FS_LABEL)
+    ax.set_ylabel("−log10 q", fontsize=FS_LABEL)
     lim = max(5.0, float(np.abs(x).max()) * 1.05)
     ax.set_xlim(-lim, lim)
-    ax.legend(fontsize=FS_CELL, frameon=False, ncol=2, loc="upper center", bbox_to_anchor=(0.5, -0.22),
-              title="significant regions per state", title_fontsize=FS_CELL)
-    _title(ax, f"Which state moved, and by how much{' · ' + contrast if contrast else ''}",
-           f"{int(sig.sum()):,} region x state pairs pass FDR {fdr:g}; dashed = FDR line")
+    ax.legend(fontsize=FS_CELL, frameon=False, ncol=2, loc="upper center", bbox_to_anchor=(0.5, -0.22))
+    _title(ax, (contrast or "").replace("_vs_", " → "))
     fig.tight_layout()
     return fig
 
 
 def plot_anova_volcano(anova: pd.DataFrame, fdr: float = 0.05, seg=None, palette: str = viz.DEFAULT_PALETTE,
                        label_top: int = 3, figsize=None):
-    """Moderated F against -log10 q for every region x state, coloured by state; points
-    above the FDR line are regions where the state's share differs among conditions, and
-    the top ones are labelled with the condition that deviates most."""
+    """Three or more conditions: the largest difference in a state's share between any
+    two conditions (percentage points) against -log10 q of the moderated F-test, one
+    point per region and state, coloured by state.
+
+    The x-axis is an effect size and not F itself: q is a monotone function of F, so F
+    against q is a single curve per state and shows nothing.
+    """
     share_cols = [c for c in anova.columns if c.startswith("share_")]
+    anova = anova.loc[anova["qvalue"].notna()]
     states = list(pd.unique(anova["state"]))
     colors = viz._label_colors(states, seg, palette)
     figsize = figsize or (WIDTH_SINGLE, 3.3)
     fig, ax = _new_fig(*figsize)
     viz._style_axes(ax, grid_axis="both")
-    q = np.clip(anova["qvalue"].to_numpy(dtype=float), 1e-12, 1)
-    F = anova["F"].to_numpy(dtype=float)
+    y = -np.log10(np.clip(anova["qvalue"].to_numpy(dtype=float), 1e-300, 1))
+    shares = anova[share_cols].to_numpy(dtype=float)
+    x = 100 * (shares.max(axis=1) - shares.min(axis=1))
+    sig = y > -np.log10(fdr)
     for s in states:
         m = (anova["state"] == s).to_numpy()
-        ax.scatter(np.log10(F[m] + 1e-9), -np.log10(q[m]), s=5, color=colors[s], alpha=0.7, linewidths=0,
-                   label=viz.state_labels([s])[0], zorder=3)
+        ax.scatter(x[m & ~sig], y[m & ~sig], s=3, color=colors[s], alpha=0.25, linewidths=0, zorder=2)
+        ax.scatter(x[m & sig], y[m & sig], s=6, color=colors[s], alpha=0.9, linewidths=0, zorder=3,
+                   label=viz.state_labels([s])[0])
     ax.axhline(-np.log10(fdr), color=INK, linewidth=0.5, linestyle="--")
-    top = anova.sort_values("qvalue").head(label_top)
-    pts = []
-    for _, r in top.iterrows():
-        shares = r[share_cols].astype(float)
-        dev = (shares - shares.median()).abs().idxmax().replace("share_", "")
-        pts.append((np.log10(r["F"] + 1e-9), -np.log10(max(r["qvalue"], 1e-12)), f"{r['name']} · {r['state']} · {dev}"))
-    viz._stagger_labels(ax, pts, fontsize=FS_CELL)
-    ax.set_xlabel("log10 moderated F", fontsize=FS_LABEL)
+    order = np.lexsort((-x, -y))[:label_top]
+    viz._stagger_labels(ax, [(x[i], y[i], str(anova["name"].iloc[i])) for i in order], fontsize=FS_CELL)
+    ax.set_xlabel("Largest difference (points)", fontsize=FS_LABEL)
     ax.set_ylabel("−log10 q", fontsize=FS_LABEL)
-    ax.set_xlim(max(-2.0, float(np.nanmin(np.log10(F + 1e-9)))), None)
-    n_sig = int((anova["qvalue"] < fdr).sum())
-    ax.legend(fontsize=FS_CELL, frameon=False, ncol=3, loc="upper center", bbox_to_anchor=(0.5, -0.2))
-    _title(ax, "Which region x state pairs differ among conditions",
-           f"{n_sig:,} of {len(anova):,} pass FDR {fdr:g}; label = most deviant condition")
+    ax.set_xlim(0, None)
+    ax.legend(fontsize=FS_CELL, frameon=False, ncol=2, loc="upper center", bbox_to_anchor=(0.5, -0.2))
     fig.tight_layout()
     return fig

@@ -337,8 +337,6 @@ def state_tests(
     per_sample = state_summary(seg, samples=[s for reps in groups.values() for s in reps],
                                include_strength=False)
     rng = np.random.default_rng(seed)
-    ds = seg.dataset
-    width = _widths(seg)
 
     # block-level soft bp per state, per condition (mean over replicates)
     cond_block: Dict[str, np.ndarray] = {}
@@ -375,9 +373,11 @@ def state_tests(
             b = cur_pct.loc[cur_pct["state"] == lbl, "pct_soft"].to_numpy(dtype=float)
             if len(a) >= 2 and len(b) >= 2 and (a.std() > 0 or b.std() > 0):
                 t, p = stats.ttest_ind(b, a, equal_var=False)
-                t_stat.append(float(t)); p_rep.append(float(p))
+                t_stat.append(float(t))
+                p_rep.append(float(p))
             else:
-                t_stat.append(np.nan); p_rep.append(np.nan)
+                t_stat.append(np.nan)
+                p_rep.append(np.nan)
             d = boot_delta[:, k]
             # two-sided bootstrap p: how often the resampled delta crosses zero
             p_block.append(float(min(1.0, 2.0 * min((d <= 0).mean(), (d >= 0).mean()) + 1.0 / n_boot)))

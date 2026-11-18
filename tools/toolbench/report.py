@@ -37,8 +37,8 @@ TOOL_METRIC_LABELS: Dict[str, str] = {
     "mean_posterior_entropy": "Mean posterior entropy",
     "agreement_ari": "Agreement with the reference tool\n(adjusted Rand index)",
     "agreement_ami": "Agreement with the reference tool\n(adjusted mutual information)",
-    "runtime_s": "Runtime (seconds)",
-    "peak_rss_mb": "Peak memory (megabytes)",
+    "runtime_s": "Run time (s)",
+    "peak_rss_mb": "Peak memory (MB)",
 }
 
 
@@ -86,17 +86,15 @@ def plot_agreement_heatmap(agreement: pd.DataFrame):
     for i in range(n):
         for j in range(n):
             v = agreement.values[i, j]
-            if np.isfinite(v):
+            if viz.ANNOTATE_VALUES and np.isfinite(v):
                 ax.text(j, i, f"{v:.2f}", ha="center", va="center", fontsize=viz.FS_CELL,
                         color="#ffffff" if v > 0.55 else viz.INK2)
 
-    ax.set_title("Agreement between tools", color=viz.INK, fontsize=viz.FS_TITLE,
-                 loc="left", pad=24)
-    ax.text(0.0, 1.015,
-            "adjusted Rand index on bins both tools called; high agreement means the two "
-            "concur, not that either is correct",
-            transform=ax.transAxes, color=viz.MUTED, fontsize=viz.FS_SUBTITLE, va="bottom")
+    # adjusted Rand index on bins both tools called; high agreement means the two concur,
+    # not that either is correct
+    viz._title(ax, "Tool agreement")
     cb = fig.colorbar(im, ax=ax, fraction=0.035, pad=0.02)
+    cb.set_label("Adjusted Rand index", fontsize=viz.FS_TICK)
     cb.ax.tick_params(colors=viz.MUTED, labelsize=viz.FS_CELL, length=2)
     cb.outline.set_visible(False)
     fig.tight_layout()
@@ -138,7 +136,7 @@ def plot_scaling(table: pd.DataFrame):
     """
     fig, axes = plt.subplots(1, 2, figsize=(viz.WIDTH_DOUBLE, 2.6), facecolor=viz.SURFACE)
     ok = table.loc[table["status"] == "ok"].copy()
-    panels = [("runtime_s", "Runtime (seconds)"), ("peak_rss_mb", "Peak memory (megabytes)")]
+    panels = [("runtime_s", "Run time (s)"), ("peak_rss_mb", "Peak memory (MB)")]
     for ax, (col, label) in zip(axes, panels):
         viz._style_axes(ax, grid_axis="both")
         for i, (_tool, grp) in enumerate(ok.groupby("tool", sort=False)):
@@ -151,12 +149,12 @@ def plot_scaling(table: pd.DataFrame):
                     linewidth=0.9, color=color, label=name)
         ax.set_xscale("log")
         ax.set_yscale("log")
-        ax.set_xlabel("Bins in the dataset (all samples)", fontsize=viz.FS_LABEL)
+        ax.set_xlabel("Bins \u00d7 samples", fontsize=viz.FS_LABEL)
         ax.set_ylabel(label, fontsize=viz.FS_LABEL)
-    viz._title(axes[0], "Runtime against dataset size",
+    viz._title(axes[0], "Run time",
                "wall clock per tool; external tools timed as subprocesses, in-process "
                "methods timed around fit and decode")
-    viz._title(axes[1], "Peak memory against dataset size",
+    viz._title(axes[1], "Peak memory",
                "external tools: their process tree; in-process methods: the whole child "
                "interpreter, including the simulated data")
     axes[1].legend(frameon=False, fontsize=viz.FS_LEGEND, loc="upper left",
@@ -304,7 +302,7 @@ def plot_perturbation_curves(runs, ds, truth, figsize=None):
     single operating point, drawn as a marker."""
     import matplotlib.pyplot as plt
     import numpy as np
-    from sklearn.metrics import average_precision_score, precision_recall_curve, roc_auc_score, roc_curve
+    from sklearn.metrics import precision_recall_curve, roc_curve
 
     from chromstate import viz
 
@@ -320,9 +318,7 @@ def plot_perturbation_curves(runs, ds, truth, figsize=None):
         if y.sum() == 0:
             continue
         base = float(y.mean())
-        ap = average_precision_score(y, score)
-        auc = roc_auc_score(y, score)
-        label = f"{run.tool} (AUPRC {ap:.2f}, AUROC {auc:.2f})"
+        label = str(run.tool)
         if run.posterior is not None:
             p, r, _ = precision_recall_curve(y, score)
             ax1.step(r, p, where="post", color=cmap(i % 10), linewidth=0.9, label=label, zorder=3)
@@ -333,20 +329,19 @@ def plot_perturbation_curves(runs, ds, truth, figsize=None):
             tp = float((called & (y > 0)).sum())
             prec = tp / max(called.sum(), 1)
             rec = tp / max(y.sum(), 1)
-            ax1.scatter([rec], [prec], color=cmap(i % 10), s=18, marker="D", zorder=4, label=label + " · hard call")
+            ax1.scatter([rec], [prec], color=cmap(i % 10), s=18, marker="D", zorder=4, label=label)
             fpr = float((called & (y == 0)).sum() / max((y == 0).sum(), 1))
             ax2.scatter([fpr], [rec], color=cmap(i % 10), s=18, marker="D", zorder=4)
     if base is not None:
         ax1.axhline(base, color=viz.INK, linewidth=0.5, linestyle="--")
-        ax1.text(0.99, base + 0.01, f"random {base:.3f}", ha="right", fontsize=viz.FS_CELL)
     ax2.plot([0, 1], [0, 1], color=viz.INK, linewidth=0.5, linestyle="--")
-    for ax, xl, yl, t in [(ax1, "recall", "precision", "Precision-recall"), (ax2, "false positive rate", "true positive rate", "ROC")]:
+    for ax, xl, yl, t in [(ax1, "Recall", "Precision", "Precision-recall"), (ax2, "False positive rate", "True positive rate", "ROC")]:
         viz._style_axes(ax, grid_axis="both")
         ax.set_xlabel(xl, fontsize=viz.FS_LABEL)
         ax.set_ylabel(yl, fontsize=viz.FS_LABEL)
         ax.set_xlim(0, 1)
         ax.set_ylim(0, 1.02)
-        viz._title(ax, t, "detecting the bins the simulated perturbation moved")
-    ax1.legend(fontsize=viz.FS_CELL, frameon=False, loc="upper right")
+        viz._title(ax, t)
+    ax2.legend(*ax1.get_legend_handles_labels(), fontsize=viz.FS_CELL, frameon=False, loc="lower right")
     fig.tight_layout()
     return fig

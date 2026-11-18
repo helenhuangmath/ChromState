@@ -28,18 +28,19 @@ from toolbench.report import plot_scaling  # noqa: E402
 
 from chromstate import viz  # noqa: E402
 
-#: Short names for a double-column figure; "real" marks the published software.
+#: Short names for a double-column figure; * marks a reimplementation of the published
+#: model, the others are the published software (versions are given in the write-up).
 SHORT_NAMES = {
     "chromstate": "ChromState",
-    "chromhmm_like": "ChromHMM-like (reimplemented)",
-    "segway_like": "Segway-like (reimplemented)",
-    "gmm": "Gaussian mixture (reimplemented)",
-    "kmeans": "k-means (reimplemented)",
-    "naive": "Naive signal (no model)",
-    "chromhmm": "ChromHMM 1.28 (real)",
-    "epicseg": "EpiCSeg 1.0 (real)",
-    "normr": "normR 1.36 (real; mark patterns)",
-    "dihmm": "diHMM (real; nucleosome level)",
+    "chromhmm_like": "ChromHMM-like*",
+    "segway_like": "Segway-like*",
+    "gmm": "Gaussian mixture*",
+    "kmeans": "k-means*",
+    "naive": "Naive signal",
+    "chromhmm": "ChromHMM",
+    "epicseg": "EpiCSeg",
+    "normr": "normR",
+    "dihmm": "diHMM",
 }
 
 KEEP = ["tool", "method", "status", "verified", "n_states", "ari", "ami", "matched_accuracy",
@@ -70,9 +71,7 @@ def main() -> int:
     figs = {
         "accuracy": viz.plot_method_comparison(
             ok, metrics=("ari", "matched_accuracy", "biv_posthoc_auprc", "signal_spearman"),
-            labels={"biv_posthoc_auprc": "Bivalency detection, one scoring rule for all "
-                                         "(area under precision-recall curve)"},
-            figsize=(viz.WIDTH_DOUBLE, 3.2)),
+            figsize=(viz.WIDTH_DOUBLE, 2.4)),
     }
     scaling = scaling.copy()
     scaling["method"] = scaling["tool"].map(SHORT_NAMES).fillna(scaling["method"])

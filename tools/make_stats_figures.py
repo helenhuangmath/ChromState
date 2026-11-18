@@ -15,8 +15,6 @@ import time
 import matplotlib
 
 matplotlib.use("Agg")
-import numpy as np
-import pandas as pd
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "src"))
@@ -52,7 +50,9 @@ def main():
     samples = tuple(s for v in GROUPS.values() for s in v)
     ds, truth = simulate(n_bins=a.n_bins, n_chroms=4, samples=samples,
                          treated=tuple(GROUPS["drug"] + GROUPS["drugB"]),
-                         perturbation={"responder_fraction": 0.5, "from_state": "ReprPC", "to_state": "TssA"},
+                         perturbation={"responder_fraction": 0.5, "from_state": "ReprPC", "to_state": "TssA",
+                                       # drugB is a weaker treatment: half of drug's responders
+                                       "sample_dose": {s: 0.5 for s in GROUPS["drugB"]}},
                          seed=7, blur=0.2)
     cs.normalize(ds)
     seg = cs.fit(ds, n_states=truth.n_states, n_restarts=2, seed=0)

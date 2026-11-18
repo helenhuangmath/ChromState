@@ -504,7 +504,20 @@ def replicate_noise_floor(
     return NoiseFloor(threshold, quantile, pooled, pairs, pd.DataFrame(rows), note)
 
 
-def _logit(p: np.ndarray, eps: float = 1e-4) -> np.ndarray:
+def _logit(p: np.ndarray, eps: float = 1e-4, n_bins: Optional[np.ndarray] = None) -> np.ndarray:
+    """Logit of a share. With ``n_bins`` (bins per region, one per row of ``p``) it is the
+    empirical logit ``log((p n + 0.5) / ((1 - p) n + 0.5))``.
+
+    A share measured on ``n`` bins cannot resolve values below about ``1 / n``. Clipping
+    at a fixed ``eps`` instead puts 0 and 0.03 several logit units apart on a 10-bin
+    region, which inflates the variance of nearly absent states (p-values pile up at 1)
+    and gives every fully switched region the same extreme statistic (a flat ceiling in
+    a volcano plot). The empirical logit is bounded by the region's own resolution.
+    """
+    if n_bins is not None:
+        n = np.asarray(n_bins, dtype=float).reshape((-1,) + (1,) * (np.ndim(p) - 1))
+        p = np.clip(p, 0.0, 1.0)
+        return np.log((p * n + 0.5) / ((1.0 - p) * n + 0.5))
     q = np.clip(p, eps, 1.0 - eps)
     return np.log(q / (1.0 - q))
 
@@ -513,8 +526,14 @@ def moderated_t_test(
     values_a: np.ndarray,
     values_b: np.ndarray,
     prior_df: float = 4.0,
+    prior_mask: Optional[np.ndarray] = None,
 ) -> Tuple[np.ndarray, np.ndarray, float]:
     """Two-sample t-test with the variance shrunk toward the across-feature typical value.
+
+    ``prior_mask`` selects the features the typical variance is taken from. Pass the
+    features that are actually tested: features where the quantity is absent in every
+    replicate have a variance near zero, and including them drags the prior down and
+    makes the test anti-conservative for the rest.
 
     With three or four replicates a per-feature variance estimate is worthless on its
     own: a region that happens to have two near-identical replicates gets a tiny standard
@@ -540,7 +559,10 @@ def moderated_t_test(
     df = n_a + n_b - 2
     var = ss / df
 
-    prior_var = float(np.median(var[np.isfinite(var) & (var > 0)])) if np.isfinite(var).any() else 1.0
+    usable = np.isfinite(var) & (var > 0)
+    if prior_mask is not None and (usable & prior_mask).any():
+        usable &= prior_mask
+    prior_var = float(np.median(var[usable])) if usable.any() else 1.0
     shrunk = (prior_df * prior_var + df * var) / (prior_df + df)
     se = np.sqrt(np.maximum(shrunk, 1e-12) * (1.0 / n_a + 1.0 / n_b))
 
@@ -726,11 +748,16 @@ def differential_regions(
         occ_b = np.stack([occupancy_of(s) for s in group_b], axis=1)
 
         n_states = occ_a.shape[2]
+        sizes = np.array([len(m) for m in members])
         pvals = np.ones((len(stat), n_states))
+        floor = np.maximum(0.01, 0.5 / np.maximum(sizes, 1))
         for k in range(n_states):
-            _, p_k, df = moderated_t_test(_logit(occ_a[:, :, k]), _logit(occ_b[:, :, k]),
-                                          prior_df=prior_df)
-            pvals[:, k] = p_k
+            # a state below the region's resolution in both groups is not a candidate
+            present = np.maximum(occ_a[:, :, k].mean(axis=1), occ_b[:, :, k].mean(axis=1)) >= floor
+            _, p_k, df = moderated_t_test(_logit(occ_a[:, :, k], n_bins=sizes),
+                                          _logit(occ_b[:, :, k], n_bins=sizes), prior_df=prior_df,
+                                          prior_mask=present)
+            pvals[:, k] = np.where(present, p_k, 1.0)
         # One test per region: the most-changed state, Bonferroni-corrected for having
         # looked at every state before picking it.
         best = np.argmin(pvals, axis=1)

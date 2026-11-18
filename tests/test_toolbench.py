@@ -307,7 +307,6 @@ def _toy_features(ds):
 
 def test_realdata_runs_round_trip_and_figures(small, tmp_path):
     import pandas as pd
-
     from toolbench.realdata import (
         expression_prediction,
         load_runs,

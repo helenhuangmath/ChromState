@@ -279,7 +279,10 @@ def plot_state_profiles(ds, runs: Sequence[ToolRun], vmax: float = 4.0):
         ax.set_xticks(range(ds.n_marks))
         ax.set_xticklabels(ds.marks, rotation=90, fontsize=viz.FS_TICK)
         ax.set_yticks(range(len(order)))
-        ax.set_yticklabels([f"{occ[k] * 100:4.1f}%" for k in order], fontsize=viz.FS_TICK)
+        # the share of bins per state is in state_classes.tsv; printing it beside every row
+        # puts ~15 numbers on each panel
+        ax.set_yticklabels([f"{occ[k] * 100:4.1f}%" for k in order] if viz.ANNOTATE_VALUES
+                           else [""] * len(order), fontsize=viz.FS_TICK)
         for yi, k in enumerate(order):
             ax.add_patch(plt.Rectangle((ds.n_marks - 0.42, yi - 0.5), 0.35, 1.0, color=cols[k],
                                        clip_on=False, transform=ax.transData))
@@ -289,7 +292,7 @@ def plot_state_profiles(ds, runs: Sequence[ToolRun], vmax: float = 4.0):
             s.set_visible(False)
         viz._title(ax, _short(run), f"{run.n_states} states; left: share of bins,\nright: state colour")
     cb = fig.colorbar(im, ax=axes.tolist(), fraction=0.03, pad=0.02)
-    cb.set_label("log2 fold over genome mean", fontsize=viz.FS_LABEL)
+    cb.set_label("Mark level (log2 fold over genome mean)", fontsize=viz.FS_LABEL)
     cb.ax.tick_params(labelsize=viz.FS_TICK)
     return fig
 
@@ -330,23 +333,24 @@ def plot_state_fractions(ds, runs: Sequence[ToolRun]):
             for c, col in CLASS_COLOURS.items():
                 v = float(sub.get(c, 0.0))
                 ax.barh(y, v, left=left, color=col, edgecolor=viz.SURFACE, linewidth=0.3, height=0.8)
-                if v > 0.06:
+                if viz.ANNOTATE_VALUES and v > 0.06:
                     ax.text(left + v / 2, y, f"{v * 100:.0f}", ha="center", va="center",
                             fontsize=viz.FS_ANNOT, color="white" if c in ("active", "polycomb", "heterochromatin", "bivalent") else viz.INK)
                 left += v
             ticks.append(y)
-            labels.append(f"{t} | {s}")
+            # the tool is named once, on the first of its rows
+            labels.append(f"{t}  {s}" if s == samples[0] else str(s))
             y += 1
         y += 0.5
     ax.set_yticks(ticks)
     ax.set_yticklabels(labels, fontsize=viz.FS_TICK)
     ax.invert_yaxis()
     ax.set_xlim(0, 1)
-    ax.set_xlabel("share of bins (posterior mass where available)", fontsize=viz.FS_LABEL)
+    ax.set_xlabel("Share of bins", fontsize=viz.FS_LABEL)
     handles = [plt.Rectangle((0, 0), 1, 1, color=c) for c in CLASS_COLOURS.values()]
-    ax.legend(handles, list(CLASS_COLOURS), fontsize=viz.FS_LEGEND, ncol=6, frameon=False,
+    ax.legend(handles, [c.capitalize() for c in CLASS_COLOURS], fontsize=viz.FS_LEGEND, ncol=6, frameon=False,
               loc="upper center", bbox_to_anchor=(0.5, -0.12))
-    viz._title(ax, "Genome share by state class",
+    viz._title(ax, "State classes",
                "classes from each state's own mark profile (active >= 2.3x, Polycomb, H3K9me3)")
     return fig
 
@@ -380,10 +384,10 @@ def plot_segment_lengths(ds, runs: Sequence[ToolRun]):
             continue
         y = np.arange(1, L.size + 1) / L.size
         ax.step(L, y, where="post", lw=1.1, color=cmap(i % 10),
-                label=f"{_short(run)} (median {np.median(L) / 1e3:.1f} kb, n={L.size:,})")
+                label=_short(run))
     ax.set_xscale("log")
-    ax.set_xlabel("segment length (bp)", fontsize=viz.FS_LABEL)
-    ax.set_ylabel("cumulative fraction of segments", fontsize=viz.FS_LABEL)
+    ax.set_xlabel("Segment length (bp)", fontsize=viz.FS_LABEL)
+    ax.set_ylabel("Cumulative fraction", fontsize=viz.FS_LABEL)
     ax.legend(fontsize=viz.FS_LEGEND, frameon=False, loc="lower right")
     viz._title(ax, "Segment lengths", "hard calls, all samples")
     return fig
@@ -426,7 +430,7 @@ def plot_state_overlap(ds, runs: Sequence[ToolRun], reference: str = "chromstate
             s.set_visible(False)
         viz._title(ax, _short(run), f"rows: {_short(ref)} states\ncolumns: {_short(run)} states")
     cb = fig.colorbar(im, ax=axes.tolist(), fraction=0.03, pad=0.02)
-    cb.set_label("fraction of the reference state's bins", fontsize=viz.FS_LABEL)
+    cb.set_label(f"Fraction of the {_short(ref)} state", fontsize=viz.FS_LABEL)
     cb.ax.tick_params(labelsize=viz.FS_TICK)
     return fig
 
@@ -699,8 +703,8 @@ def plot_expression_prediction(table: pd.DataFrame, contrast: Tuple[str, str]):
     names = table["method"].tolist()
     y = np.arange(len(names))
     for ax, key, title in zip(axes, ("level", "change"),
-                              ("Expression level from promoter states",
-                               f"Expression change ({contrast[1]} - {contrast[0]})")):
+                              ("Expression level",
+                               f"Expression change, {contrast[1]} vs {contrast[0]}")):
         viz._style_axes(ax, grid_axis="x")
         v = table[f"{key}_rho"].to_numpy(float)
         lo = table[f"{key}_lo"].to_numpy(float)
@@ -710,13 +714,14 @@ def plot_expression_prediction(table: pd.DataFrame, contrast: Tuple[str, str]):
         ax.barh(y, np.nan_to_num(v), color=cols, edgecolor=viz.SURFACE, linewidth=0.5, zorder=3)
         ax.errorbar(v, y, xerr=[v - lo, hi - v], fmt="none", ecolor=viz.INK, elinewidth=0.6, capsize=1.5, zorder=4)
         for yi, vv, hh in zip(y, v, hi):
-            if np.isfinite(vv):
+            if viz.ANNOTATE_VALUES and np.isfinite(vv):
                 ax.text(max(hh, vv, 0) + 0.015, yi, f"{vv:.2f}", va="center", fontsize=viz.FS_ANNOT)
+        ax.tick_params(axis="y", length=0)
         ax.set_yticks(y)
         ax.set_yticklabels(names if key == "level" else [""] * len(names), fontsize=viz.FS_TICK)
         ax.invert_yaxis()
-        ax.set_xlim(min(0, np.nanmin(lo) - 0.05), max(0.3, np.nanmax(hi) + 0.12))
-        ax.set_xlabel("held-out Spearman rho (95% bootstrap CI)", fontsize=viz.FS_LABEL)
+        ax.set_xlim(min(0, np.nanmin(lo) - 0.05), max(0.3, np.nanmax(hi) + 0.05))
+        ax.set_xlabel("Spearman, held-out genes", fontsize=viz.FS_LABEL)
         viz._title(ax, title, f"n = {int(table[f'{key}_n'].max()):,} gene x sample" if key == "level"
                    else f"n = {int(table[f'{key}_n'].max()):,} genes")
     fig.tight_layout()
@@ -730,8 +735,8 @@ def plot_promoter_recovery(table: pd.DataFrame):
     axes = np.atleast_1d(axes)
     names = table["method"].tolist()
     y = np.arange(len(names))
-    titles = {"tss_auprc": ("Finding promoters from states", "positives: bins within the TSS flank of any gene"),
-              "active_tss_auprc": ("Finding active promoters", "positives: TSS bins of top-30% expressed genes")}
+    titles = {"tss_auprc": ("All promoters", "positives: bins within the TSS flank of any gene"),
+              "active_tss_auprc": ("Active promoters", "positives: TSS bins of top-30% expressed genes")}
     for ax, key in zip(axes, keys):
         viz._style_axes(ax, grid_axis="x")
         v = table[key].to_numpy(float)
@@ -739,16 +744,16 @@ def plot_promoter_recovery(table: pd.DataFrame):
         ax.barh(y, np.nan_to_num(v), color=cols, edgecolor=viz.SURFACE, linewidth=0.5, zorder=3)
         base = float(table[key.replace("auprc", "baseline")].mean())
         ax.axvline(base, color=viz.INK, lw=0.6, ls="--")
-        ax.text(base + 0.003, len(names) - 0.45, f"chance {base:.3f}", fontsize=viz.FS_ANNOT,
-                ha="left", va="top", style="italic")
+        # dashed line: the value a random ranking gives
         for yi, vv in zip(y, v):
-            if np.isfinite(vv):
+            if viz.ANNOTATE_VALUES and np.isfinite(vv):
                 ax.text(vv + 0.01, yi, f"{vv:.3f}", va="center", fontsize=viz.FS_ANNOT)
+        ax.tick_params(axis="y", length=0)
         ax.set_yticks(y)
         ax.set_yticklabels(names if key == keys[0] else [""] * len(names), fontsize=viz.FS_TICK)
         ax.invert_yaxis()
-        ax.set_xlim(0, max(0.2, np.nanmax(v) * 1.25))
-        ax.set_xlabel("AUPRC, two-fold by alternating 1 Mb blocks", fontsize=viz.FS_LABEL)
+        ax.set_xlim(0, max(0.2, np.nanmax(v) * 1.1))
+        ax.set_xlabel("AUPRC", fontsize=viz.FS_LABEL)
         viz._title(ax, *titles[key])
     fig.tight_layout()
     return fig
@@ -836,7 +841,7 @@ def plot_locus(ds, runs: Sequence[ToolRun], chrom: str, start: int, end: int,
             ax.set_yticks([])
             for s in ax.spines.values():
                 s.set_visible(False)
-            ax.set_xlabel(f"{chrom} position (Mb)", fontsize=viz.FS_LABEL)
+            ax.set_xlabel(f"{chrom} (Mb)", fontsize=viz.FS_LABEL)
             ax.tick_params(labelsize=viz.FS_TICK)
             from matplotlib.ticker import MaxNLocator
 

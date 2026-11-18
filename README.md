@@ -1,9 +1,12 @@
 # ChromState: quantitative chromatin state analysis
 
 
+**Documentation:** <https://helenhuangmath.github.io/ChromState/> ·
+[Changelog](CHANGELOG.md) · [Contributing](CONTRIBUTING.md) · [Citation](CITATION.cff)
+
 Browse the included [example figures](docs/figures/README.md) from the simulation and CD8 T-cell tutorials.
 
-**Hua Huang** · Version 0.3.0 (research release)
+**Hua Huang** · Version 1.0
 Python package `chromstate`, R interface `chromstatR` · MIT licence
 
 ---
@@ -871,7 +874,7 @@ tests/               unit and ground-truth tests
 
 ```bash
 pip install -e ".[dev]"
-pytest -q                       # 161 tests, including recovery of simulated ground truth
+pytest -q                       # unit tests, including recovery of simulated ground truth
 ruff check src tests
 ```
 

@@ -10,6 +10,17 @@ day 32). The methods and code are in [`README.md`](README.md) and
 [Tutorial 2](../../docs/tutorials/02_cd8_tcell_application.md). The figures are in
 `out/figures/`.
 
+Each lettered panel is written as its own PDF, `Fig<n>_<letters>_<name>.pdf` (panels that
+share an axis stay together, as in `Fig2_a-c` and `Fig5_a-c`; Fig. 6, 7 and 9 are single
+figures). States are listed from active transcription start site to quiescent. Three
+details are given here rather than drawn on the figures: in Fig. 4, filled points are
+corrected for measurement error using replicate reliabilities (H3K4me3 0.99, H3K27ac
+0.99, H3K27me3 0.93, H3K9me3 0.67, RNA 1.00), open points (background states) are
+uncorrected, and bars are 95% bootstrap intervals over genes; in Fig. 5a the states carry
+plain names, and their mark enrichments are those of Fig. 1a; in Fig. 9, 19,278 genes are
+clustered (k-means, k = 10) on promoter state, promoter mark-strength change and distal
+enhancer input change, with N = TN, M = TMEM, E = TEX and Δ = change from TN.
+
 ---
 
 ## 1. A quantitative chromatin state map of naive, memory and exhausted CD8 T cells

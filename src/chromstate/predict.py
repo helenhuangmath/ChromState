@@ -28,7 +28,6 @@ import numpy as np
 import pandas as pd
 
 from .regulation import (
-    ExpressionTask,
     ModelSpec,
     RepresentationResult,
     StateImportance,
@@ -111,7 +110,7 @@ class PredictionResult:
             from . import viz
 
             figs = {"state_importance": viz.plot_state_importance(self.importance, seg, palette=palette,
-                                                                   title=f"Which states predict {self.kind}"),
+                                                                   title="State importance"),
                     "predicted_vs_observed": plot_predicted_vs_observed(self.predictions, self.summary),
                     "representations": plot_representations(self.representations)}
             if self.parts is not None and not self.parts.empty:
@@ -265,13 +264,26 @@ def plot_predicted_vs_observed(predictions: pd.DataFrame, summary: Dict[str, obj
         ax.scatter(x[ok], y[ok], s=4, color="#395493", alpha=0.5, linewidths=0, zorder=3)
     lo, hi = np.nanmin(np.r_[x[ok], y[ok]]), np.nanmax(np.r_[x[ok], y[ok]])
     ax.plot([lo, hi], [lo, hi], color=viz.INK, linewidth=0.5, linestyle="--")
-    ax.set_xlabel(f"observed {summary.get('kind', '')}", fontsize=viz.FS_LABEL)
-    ax.set_ylabel("held-out prediction", fontsize=viz.FS_LABEL)
-    viz._title(ax, "Predicted versus observed",
+    ax.set_xlabel(f"Measured {summary.get('kind', '')}".strip(), fontsize=viz.FS_LABEL)
+    ax.set_ylabel("Predicted (held-out genes)", fontsize=viz.FS_LABEL)
+    ax.text(0.04, 0.96, f"Spearman {summary['rho']:.2f}", transform=ax.transAxes, va="top",
+            fontsize=viz.FS_ANNOT, color=viz.INK)
+    viz._title(ax, "Predicted vs measured",
                f"rho {summary['rho']:.3f} ({summary['rho_lo']:.3f}-{summary['rho_hi']:.3f}), "
                f"R² {summary['r2']:.3f}, n = {summary['n_genes']:,}")
     fig.tight_layout()
     return fig
+
+
+#: Display names for the ways a gene's chromatin can be described to the predictor.
+FAMILY_NAMES = {
+    "quantitative+signal": "Quantitative states + signal",
+    "quantitative": "Quantitative states",
+    "occupancy+intensity": "State share + intensity",
+    "occupancy": "State share",
+    "signal": "Raw signal",
+    "top_state": "Hard label",
+}
 
 
 def plot_representations(scores: pd.DataFrame, figsize=None):
@@ -292,8 +304,8 @@ def plot_representations(scores: pd.DataFrame, figsize=None):
     ax.errorbar(v, yy, xerr=np.vstack([np.clip(lo, 0, None), np.clip(hi, 0, None)]), fmt="none",
                 ecolor=viz.INK, elinewidth=0.5, capsize=1.5, zorder=4)
     ax.set_yticks(yy)
-    ax.set_yticklabels(tab["family"], fontsize=viz.FS_TICK)
-    ax.set_xlabel("held-out Spearman ρ with expression", fontsize=viz.FS_LABEL)
-    viz._title(ax, "Representations of chromatin", "red = ChromState quantitative; grey = hard labels / raw signal")
+    ax.set_yticklabels([FAMILY_NAMES.get(str(f), str(f)) for f in tab["family"]], fontsize=viz.FS_TICK)
+    ax.set_xlabel("Spearman, held-out genes", fontsize=viz.FS_LABEL)
+    viz._title(ax, "Chromatin representation", "red = ChromState quantitative; grey = hard labels / raw signal")
     fig.tight_layout()
     return fig

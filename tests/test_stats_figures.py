@@ -7,14 +7,13 @@ import sys
 
 import matplotlib
 import numpy as np
-import pandas as pd
 import pytest
 
 matplotlib.use("Agg")
 
 import chromstate as cs
 from chromstate import viz_stats as vs
-from chromstate.compare import differential_report, permuted_region_state_tests, region_state_tests
+from chromstate.compare import differential_report, permuted_region_state_tests
 from chromstate.simulate import simulate
 
 GROUPS = {"ctrl": ["a1", "a2", "a3"], "drug": ["b1", "b2", "b3"], "other": ["c1", "c2", "c3"]}
@@ -73,7 +72,7 @@ def test_permuted_pvalues_are_uniform_and_observed_are_not(report):
     assert np.isclose(nf.threshold, np.quantile(nf.distribution, 0.95))
     assert (rep.regions["ctrl_vs_drug"]["tv_distance"] > nf.threshold).mean() < 0.5
     # the perturbation moves ReprPC -> TssA, so those states carry real signal
-    tssa = [l for l in seg.labels if "Tss" in l and "Biv" not in l][0]
+    tssa = [lbl for lbl in seg.labels if "Tss" in lbl and "Biv" not in lbl][0]
     assert (obs.loc[obs["state"] == tssa, "pvalue"] < 0.05).mean() > (pm < 0.05).mean()
     fig = vs.plot_pvalue_histograms(obs, perm)
     assert fig.axes
@@ -81,7 +80,7 @@ def test_permuted_pvalues_are_uniform_and_observed_are_not(report):
 
 def test_concordance_and_ecdf(report):
     _, _, seg, rep, regions = report
-    tssa = [l for l in seg.labels if "Tss" in l and "Biv" not in l][0]
+    tssa = [lbl for lbl in seg.labels if "Tss" in lbl and "Biv" not in lbl][0]
     fig = vs.plot_replicate_concordance(seg, regions, tssa, ("a1", "a2"), ("a1", "b1"), noise_floor=rep.noise_floor)
     assert len(fig.axes) == 2
     fig2 = vs.plot_change_ecdf(seg, GROUPS, regions, reference="ctrl", noise_floor=rep.noise_floor)

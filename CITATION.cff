@@ -1,0 +1,18 @@
+cff-version: 1.2.0
+message: "If you use ChromState, please cite it as below."
+title: "ChromState: quantitative chromatin state analysis"
+type: software
+authors:
+  - family-names: Huang
+    given-names: Hua
+version: 1.1.0
+date-released: 2026-11-18
+license: MIT
+repository-code: "https://github.com/helenhuangmath/ChromState"
+url: "https://helenhuangmath.github.io/ChromState/"
+keywords:
+  - epigenomics
+  - chromatin states
+  - hidden Markov model
+  - ChIP-seq
+  - CUT&RUN

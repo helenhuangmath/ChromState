@@ -40,7 +40,6 @@ import pandas as pd
 from .dataset import ChromStateDataset, _chains_from_runs
 from .model.core import Segmentation
 
-
 # ---------------------------------------------------------------------------
 # Pseudobulk
 # ---------------------------------------------------------------------------

@@ -57,12 +57,13 @@ import pandas as pd
 from matplotlib.colors import LinearSegmentedColormap, TwoSlopeNorm
 from matplotlib.patches import Patch
 
-from .model.annotate import (
+from .model.annotate import (  # noqa: F401  (display_order is re-exported for figure scripts)
     OKABE_ITO,
     SCIREP2025_GROUP_COLORS,
     STATE_COLORS,
     STATE_COLORS_NATURE,
     STATE_COLORS_SCIREP2025,
+    display_order,
     full_state_name,
 )
 from .model.core import Segmentation
@@ -208,6 +209,17 @@ def _new_fig(w: float, h: float) -> Tuple[plt.Figure, plt.Axes]:
     return fig, ax
 
 
+#: Explanatory subtitles under panel titles. Off: a figure carries its title, axes and
+#: legend, and the explanation belongs in the figure legend. Set True for self-explaining
+#: exploratory output.
+SHOW_SUBTITLES = False
+
+#: Numbers printed on the figure itself: a value beside every bar, in every heat-map cell
+#: and on every stacked segment. Off: the axis or the colour bar carries the values and the
+#: exact numbers belong in the legend or a table. Set True for exploratory output.
+ANNOTATE_VALUES = False
+
+
 def _title(ax: plt.Axes, text: str, subtitle: Optional[str] = None) -> None:
     """Left-aligned title with an optional one-line explanation wrapped to the panel width.
 
@@ -215,7 +227,7 @@ def _title(ax: plt.Axes, text: str, subtitle: Optional[str] = None) -> None:
     tight bounding box would then silently widen the figure beyond the journal column.
     """
     lines: List[str] = []
-    if subtitle:
+    if subtitle and SHOW_SUBTITLES:
         fig = ax.figure
         width_in = ax.get_position().width * fig.get_figwidth()
         chars = max(20, int(width_in * 72 / (FS_SUBTITLE * 0.5)))
@@ -314,20 +326,20 @@ def plot_emission_heatmap(seg: Segmentation, normalize: bool = True, figsize=(WI
     ax.grid(which="minor", color=SURFACE, linewidth=0.5)
     ax.tick_params(which="minor", length=0)
 
-    for i in range(Z.shape[0]):
-        for j in range(Z.shape[1]):
-            ax.text(
-                j, i, f"{E.values[i, j]:.0f}",
-                ha="center", va="center", fontsize=FS_CELL,
-                color=INK,
-            )
+    if ANNOTATE_VALUES:
+        for i in range(Z.shape[0]):
+            for j in range(Z.shape[1]):
+                ax.text(
+                    j, i, f"{E.values[i, j]:.0f}",
+                    ha="center", va="center", fontsize=FS_CELL,
+                    color=INK,
+                )
 
-    ax.set_xlabel("histone mark", color=INK2, fontsize=FS_LABEL)
-    ax.set_ylabel("chromatin state", color=INK2, fontsize=FS_LABEL)
-    _title(ax, "Emission parameters",
+    _title(ax, "Mark levels",
            "cell colour = fraction of that mark's maximum across states; "
            "number = mean read count per 200 base-pair bin")
     cb = fig.colorbar(im, ax=ax, fraction=0.035, pad=0.02)
+    cb.set_label("Fraction of mark maximum" if normalize else "Mean count", fontsize=FS_TICK)
     cb.ax.tick_params(colors=INK, labelsize=FS_TICK, length=1.5, width=0.4)
     cb.outline.set_visible(False)
     fig.tight_layout()
@@ -355,15 +367,16 @@ def plot_transition_heatmap(seg: Segmentation, figsize=(WIDTH_MID, 3.9)):
     for i in range(T.shape[0]):
         for j in range(T.shape[1]):
             v = T.values[i, j]
-            if v >= 0.01:
+            if ANNOTATE_VALUES and v >= 0.01:
                 ax.text(j, i, f"{v:.2f}", ha="center", va="center", fontsize=FS_CELL,
                         color=INK)
 
-    ax.set_xlabel("state in the next bin", color=INK2, fontsize=FS_LABEL)
-    ax.set_ylabel("state in the current bin", color=INK2, fontsize=FS_LABEL)
+    ax.set_xlabel("Next bin", color=INK2, fontsize=FS_LABEL)
+    ax.set_ylabel("Current bin", color=INK2, fontsize=FS_LABEL)
     _title(ax, "Transition probabilities",
            "strong diagonal = states form extended domains rather than alternating bin to bin")
     cb = fig.colorbar(im, ax=ax, fraction=0.035, pad=0.02)
+    cb.set_label("Probability", fontsize=FS_TICK)
     cb.ax.tick_params(colors=INK, labelsize=FS_TICK, length=1.5, width=0.4)
     cb.outline.set_visible(False)
     fig.tight_layout()
@@ -384,22 +397,22 @@ def plot_state_coverage(seg: Segmentation, palette: str = DEFAULT_PALETTE, figsi
 
     fig, ax = _new_fig(*figsize)
     ax.bar(x - w / 2 - 0.01, tab["coverage_hard"], w, color=colors, edgecolor=SURFACE,
-           linewidth=0.5, label="hard assignment (Viterbi path)", zorder=3)
+           linewidth=0.5, label="Hard calls", zorder=3)
     ax.bar(x + w / 2 + 0.01, tab["coverage_soft"], w, color=colors, edgecolor=SURFACE,
-           linewidth=0.5, alpha=0.45, label="soft assignment (mean posterior probability)",
+           linewidth=0.5, alpha=0.45, label="Posterior mass",
            zorder=3)
 
     ax.set_xticks(x)
     ax.set_xticklabels(state_labels(tab["label"]), rotation=45, ha="right",
                        fontsize=FS_TICK, color=INK2)
-    ax.set_ylabel("fraction of genome bins", fontsize=FS_LABEL)
+    ax.set_ylabel("Fraction of bins", fontsize=FS_LABEL)
     _title(ax, "State coverage",
            "solid = hard assignment, translucent = mean posterior probability mass")
     # Neutral swatches: taking them from the bars would key the legend to whichever state
     # happens to be first, which for a near-white quiescent state is invisible.
     handles = [
-        Patch(facecolor=INK2, label="hard assignment (Viterbi path)"),
-        Patch(facecolor=INK2, alpha=0.45, label="soft assignment (mean posterior probability)"),
+        Patch(facecolor=INK2, label="Hard calls"),
+        Patch(facecolor=INK2, alpha=0.45, label="Posterior mass"),
     ]
     leg = ax.legend(handles=handles, frameon=False, fontsize=FS_LEGEND, loc="upper left")
     for t in leg.get_texts():
@@ -458,13 +471,13 @@ def plot_segmentation_track(
     _style_axes(ax)
     for j, mark in enumerate(ds.marks):
         ax.plot(pos, X[:, j], linewidth=0.75, color=CVD_PALETTE[j % len(CVD_PALETTE)], label=mark)
-    ax.set_ylabel("normalised read count", fontsize=FS_LABEL)
+    ax.set_ylabel("Normalised signal", fontsize=FS_LABEL)
     leg = ax.legend(frameon=False, fontsize=FS_LEGEND, ncol=len(ds.marks), loc="lower left",
                     bbox_to_anchor=(0, 1.01), handlelength=1.4, columnspacing=1.2)
     for t in leg.get_texts():
         t.set_color(INK2)
     # Title goes on the figure, above the mark legend, so the two cannot collide.
-    fig.suptitle(f"{sample} — {bins['chrom'].iloc[0]}", color=INK, fontsize=FS_TITLE,
+    fig.suptitle(str(sample), color=INK, fontsize=FS_TITLE,
                  x=0.08, ha="left", y=0.985)
 
     ax = axes[1]
@@ -473,7 +486,7 @@ def plot_segmentation_track(
     ax.bar(pos, np.ones(len(pos)), width=width, color=[colors[s] for s in states], linewidth=0)
     ax.set_ylim(0, 1)
     ax.set_yticks([])
-    ax.set_ylabel("hard state\ncall", fontsize=FS_TICK, color=INK2, rotation=0,
+    ax.set_ylabel("State", fontsize=FS_TICK, color=INK2, rotation=0,
                   ha="right", va="center")
     for spine in ax.spines.values():
         spine.set_visible(False)
@@ -484,8 +497,8 @@ def plot_segmentation_track(
     full = state_labels(seg.labels)
     ax.stackplot(pos, post.T, colors=colors, labels=full, linewidth=0.4, edgecolor=SURFACE)
     ax.set_ylim(0, 1)
-    ax.set_ylabel("posterior probability", fontsize=FS_LABEL)
-    ax.set_xlabel(f"position on {bins['chrom'].iloc[0]} (kilobases)", fontsize=FS_LABEL)
+    ax.set_ylabel("Posterior", fontsize=FS_LABEL)
+    ax.set_xlabel(f"Position on {bins['chrom'].iloc[0]} (kb)", fontsize=FS_LABEL)
     handles = [Patch(facecolor=c, label=lbl) for c, lbl in zip(colors, full)]
     # Spelled-out state names are wide, so the legend runs at most three to a row.
     leg = ax.legend(handles=handles, frameon=False, fontsize=FS_LEGEND, ncol=min(seg.n_states, 3),
@@ -511,17 +524,17 @@ def plot_confidence(table: pd.DataFrame, figsize=(WIDTH_DOUBLE, 2.0)):
         _style_axes(ax)
 
     axes[0].hist(table["confidence"], bins=40, color="#2a78d6", edgecolor=SURFACE, linewidth=0.5)
-    axes[0].set_xlabel("posterior probability of the winning state", fontsize=FS_LABEL)
-    axes[0].set_ylabel("number of genome bins", fontsize=FS_LABEL)
+    axes[0].set_xlabel("Posterior of the called state", fontsize=FS_LABEL)
+    axes[0].set_ylabel("Bins", fontsize=FS_LABEL)
     _title(axes[0], "Call confidence")
 
     axes[1].hist(table["entropy"], bins=40, color="#eb6834", edgecolor=SURFACE, linewidth=0.5)
-    axes[1].set_xlabel("normalised entropy across states", fontsize=FS_LABEL)
+    axes[1].set_xlabel("Normalised entropy", fontsize=FS_LABEL)
     _title(axes[1], "State ambiguity")
 
     amb = float((table["confidence"] < 0.8).mean())
     axes[2].hist(table["margin"], bins=40, color="#1baf7a", edgecolor=SURFACE, linewidth=0.5)
-    axes[2].set_xlabel("winning minus runner-up posterior probability", fontsize=FS_LABEL)
+    axes[2].set_xlabel("Posterior margin over runner-up", fontsize=FS_LABEL)
     _title(axes[2], "Decision margin",
            f"{amb:.1%} of bins fall below 0.8 posterior probability")
 
@@ -541,23 +554,24 @@ def plot_bivalency(table: pd.DataFrame, sample: Optional[str] = None, figsize=(W
 
     sc = axes[0].scatter(sub[a_col], sub[r_col], c=sub["bivalency_score"], cmap=SEQ_CMAP,
                          s=1.5, linewidths=0, alpha=0.75)
-    axes[0].set_xlabel("H3K4me3 signal (log-transformed, normalised)", fontsize=FS_LABEL)
-    axes[0].set_ylabel("H3K27me3 signal (log-transformed, normalised)", fontsize=FS_LABEL)
+    axes[0].set_xlabel("H3K4me3 signal (log)", fontsize=FS_LABEL)
+    axes[0].set_ylabel("H3K27me3 signal (log)", fontsize=FS_LABEL)
     _title(axes[0], "Signal plane", "colour = bivalency score")
     cb = fig.colorbar(sc, ax=axes[0], fraction=0.045, pad=0.02)
+    cb.set_label("Bivalency score", fontsize=FS_TICK)
     cb.ax.tick_params(colors=INK, labelsize=FS_TICK, length=1.5, width=0.4)
     cb.outline.set_visible(False)
 
     axes[1].scatter(sub["bivalency_magnitude"], sub["bivalency_balance"],
                     c="#4a3aa7", s=1.5, linewidths=0, alpha=0.5)
-    axes[1].set_xlabel("magnitude: geometric mean of active and repressive signal", fontsize=FS_LABEL)
-    axes[1].set_ylabel("balance: active against repressive signal", fontsize=FS_LABEL)
+    axes[1].set_xlabel("Magnitude", fontsize=FS_LABEL)
+    axes[1].set_ylabel("Balance", fontsize=FS_LABEL)
     _title(axes[1], "Decomposition", "top right = strong and balanced")
 
     axes[2].scatter(sub["biv_within_state"], sub["biv_between_state"],
                     c="#eb6834", s=1.5, linewidths=0, alpha=0.5)
-    axes[2].set_xlabel("bivalency within a single state", fontsize=FS_LABEL)
-    axes[2].set_ylabel("bivalency between states (mixture-confounded)", fontsize=FS_LABEL)
+    axes[2].set_xlabel("Within one state", fontsize=FS_LABEL)
+    axes[2].set_ylabel("Between states", fontsize=FS_LABEL)
     _title(axes[2], "Mixture caveat",
            "high on the vertical axis = possibly two cell populations, not one bivalent region")
 
@@ -584,13 +598,12 @@ def plot_attribution(importance: pd.DataFrame, figsize=(WIDTH_SINGLE, 3.0)):
     ax.grid(which="minor", color=SURFACE, linewidth=0.5)
     ax.tick_params(which="minor", length=0)
 
-    for i in range(V.shape[0]):
-        for j in range(V.shape[1]):
-            ax.text(i * 0 + j, i, f"{V[i, j]:.1f}", ha="center", va="center", fontsize=FS_CELL,
-                    color=INK)
+    if ANNOTATE_VALUES:
+        for i in range(V.shape[0]):
+            for j in range(V.shape[1]):
+                ax.text(i * 0 + j, i, f"{V[i, j]:.1f}", ha="center", va="center", fontsize=FS_CELL,
+                        color=INK)
 
-    ax.set_xlabel("histone mark", color=INK2, fontsize=FS_LABEL)
-    ax.set_ylabel("chromatin state", color=INK2, fontsize=FS_LABEL)
     # Warm = positive, cool = negative, neutral grey at zero: the standard diverging
     # convention. The caption must state the sign mapping explicitly, since "supports"
     # and "argues against" are not inferable from the colours alone.
@@ -598,6 +611,7 @@ def plot_attribution(importance: pd.DataFrame, figsize=(WIDTH_SINGLE, 3.0)):
            "evidence for the called state over the runner-up state, in natural log units; "
            "red supports the call, blue argues against it")
     cb = fig.colorbar(im, ax=ax, fraction=0.035, pad=0.02)
+    cb.set_label("Evidence for the call (nats)", fontsize=FS_TICK)
     cb.ax.tick_params(colors=INK, labelsize=FS_TICK, length=1.5, width=0.4)
     cb.outline.set_visible(False)
     fig.tight_layout()
@@ -624,16 +638,17 @@ def plot_state_flow(flow: pd.DataFrame, sample_a: str, sample_b: str, figsize=(W
     for i in range(flow.shape[0]):
         for j in range(flow.shape[1]):
             v = flow.values[i, j]
-            if v >= 0.01:
+            if ANNOTATE_VALUES and v >= 0.01:
                 ax.text(j, i, f"{v:.2f}", ha="center", va="center", fontsize=FS_CELL,
                         color=INK)
 
-    ax.set_xlabel(f"state in sample {sample_b}", color=INK2, fontsize=FS_LABEL)
-    ax.set_ylabel(f"state in sample {sample_a}", color=INK2, fontsize=FS_LABEL)
+    ax.set_xlabel(str(sample_b), color=INK2, fontsize=FS_LABEL)
+    ax.set_ylabel(str(sample_a), color=INK2, fontsize=FS_LABEL)
     _title(ax, "State flow",
            "probability of the state afterwards given the state before, "
            "from matched bins and full posterior probabilities")
     cb = fig.colorbar(im, ax=ax, fraction=0.035, pad=0.02)
+    cb.set_label("Probability", fontsize=FS_TICK)
     cb.ax.tick_params(colors=INK, labelsize=FS_TICK, length=1.5, width=0.4)
     cb.outline.set_visible(False)
     fig.tight_layout()
@@ -658,8 +673,8 @@ def plot_occupancy_change(occ: pd.DataFrame, figsize=(WIDTH_MID, 2.6)):
     ax.axhline(0, color=AXIS, linewidth=0.5, zorder=4)
     ax.set_xticks(x)
     ax.set_xticklabels(state_labels(D.columns), rotation=45, ha="right", fontsize=FS_TICK, color=INK2)
-    ax.set_ylabel("change in fraction of genome bins", fontsize=FS_LABEL)
-    _title(ax, "State occupancy change", f"relative to sample {occ.index[0]}")
+    ax.set_ylabel("Change in fraction of bins", fontsize=FS_LABEL)
+    _title(ax, f"Occupancy change vs {occ.index[0]}")
     if n > 1:
         leg = ax.legend(frameon=False, fontsize=FS_LEGEND)
         for t in leg.get_texts():
@@ -676,29 +691,31 @@ def plot_occupancy_change(occ: pd.DataFrame, figsize=(WIDTH_MID, 2.6)):
 # Spelled-out panel titles for benchmark metric columns. Anything not listed falls back
 # to its column name, which is the signal that a new metric still needs a label.
 METRIC_LABELS: Dict[str, str] = {
-    "ari": "Adjusted Rand index",
-    "ami": "Adjusted mutual information",
+    "ari": "State recovery (ARI)",
+    "ami": "State recovery (AMI)",
     "v_measure": "V-measure",
-    "matched_accuracy": "Accuracy against known truth",
-    "biv_auprc": "Bivalency detection\n(area under precision-recall curve)",
-    "biv_auroc": "Bivalency detection\n(area under ROC curve)",
-    "signal_spearman": "Tracks signal magnitude\n(Spearman correlation)",
-    "signal_pearson": "Tracks signal magnitude\n(Pearson correlation)",
-    "overconfidence": "Overconfidence (lower is better)",
-    "frac_saturated": "Saturated calls (lower is better)",
-    "ece": "Expected calibration error\n(lower is better)",
-    "mean_entropy": "Mean posterior entropy",
+    "matched_accuracy": "Accuracy",
+    "biv_auprc": "Bivalent bins (AUPRC)",
+    "biv_posthoc_auprc": "Bivalent bins (AUPRC)",
+    "biv_auroc": "Bivalent bins (AUROC)",
+    "signal_spearman": "Signal retained (Spearman)",
+    "signal_pearson": "Signal retained (Pearson)",
+    "overconfidence": "Overconfidence",
+    "frac_saturated": "Saturated calls",
+    "ece": "Calibration error",
+    "mean_entropy": "Posterior entropy",
 }
 
-# Display names for the benchmark rows. The table keys stay short because they are also
-# joined against and written to disk; only the figure spells them out.
+# Display names for the benchmark rows. The table keys carry the model family because they
+# are also joined against and written to disk; the figure shows the short name only and
+# the legend says what each method is.
 METHOD_DISPLAY_NAMES: Dict[str, str] = {
-    "ChromState (NB-HMM)": "ChromState\n(negative-binomial hidden Markov model)",
-    "ChromHMM-like (Bernoulli)": "ChromHMM-like\n(binarised Bernoulli hidden Markov model)",
-    "Segway-like (Gaussian)": "Segway-like\n(Gaussian hidden Markov model)",
-    "GMM (no spatial model)": "Gaussian mixture model\n(no spatial model)",
-    "k-means": "k-means clustering\n(hard assignment)",
-    "Naive signal (no model)": "Naive signal combination\n(no model)",
+    "ChromState (NB-HMM)": "ChromState",
+    "ChromHMM-like (Bernoulli)": "ChromHMM-like",
+    "Segway-like (Gaussian)": "Segway-like",
+    "GMM (no spatial model)": "Gaussian mixture",
+    "k-means": "k-means",
+    "Naive signal (no model)": "Naive signal",
 }
 
 
@@ -741,12 +758,12 @@ def plot_method_comparison(
                            fontsize=FS_TICK, color=INK2)
         ax.invert_yaxis()
         for yi, v in zip(y, vals):
-            if np.isfinite(v):
+            if not np.isfinite(v):
+                ax.text(0.02, yi, "n.a.", va="center", fontsize=FS_ANNOT, color=MUTED)
+            elif ANNOTATE_VALUES:
                 ax.text(v + 0.015, yi, f"{v:.2f}", va="center", fontsize=FS_ANNOT, color=INK2)
-            else:
-                ax.text(0.02, yi, "not applicable", va="center", fontsize=FS_ANNOT, color=MUTED,
-                        style="italic")
-        ax.set_xlim(0, max(1.0, np.nanmax(vals) * 1.18) if np.isfinite(vals).any() else 1.0)
+        ax.tick_params(axis="y", length=0)
+        ax.set_xlim(0, max(1.0, np.nanmax(vals) * 1.05) if np.isfinite(vals).any() else 1.0)
         _title(ax, title)
 
     fig.tight_layout()
@@ -766,7 +783,6 @@ def plot_calibration(
     """
     fig, ax = _new_fig(*figsize)
     ax.plot([0, 1], [0, 1], color=AXIS, linewidth=0.6, linestyle=(0, (3, 2)), zorder=2)
-    ax.text(0.62, 0.66, "perfectly calibrated model", fontsize=FS_ANNOT, color=MUTED, rotation=38)
 
     edges = np.linspace(0, 1, n_bins + 1)
     for i, (name, post) in enumerate(posteriors.items()):
@@ -784,8 +800,8 @@ def plot_calibration(
                 label=METHOD_DISPLAY_NAMES.get(name, name).replace("\n", " "),
                 markeredgecolor=SURFACE, markeredgewidth=0.5, zorder=3)
 
-    ax.set_xlabel("reported confidence (posterior probability)", fontsize=FS_LABEL)
-    ax.set_ylabel("observed accuracy", fontsize=FS_LABEL)
+    ax.set_xlabel("Reported confidence", fontsize=FS_LABEL)
+    ax.set_ylabel("Observed accuracy", fontsize=FS_LABEL)
     ax.set_xlim(0, 1.02)
     ax.set_ylim(0, 1.02)
     _title(ax, "Calibration",
@@ -798,16 +814,20 @@ def plot_calibration(
 
 
 NORMALIZATION_DISPLAY_NAMES: Dict[str, str] = {
-    "depth": "sequencing depth",
-    "median_ratio": "median of ratios",
-    "spikein": "spike-in scaling",
-    "none": "no normalisation",
-    "quantile": "quantile normalisation",
+    "depth": "Depth",
+    "median_ratio": "Median ratio",
+    "spikein": "Spike-in",
+    "none": "None",
+    "quantile": "Quantile",
 }
 
 
 def plot_normalization_experiment(table: pd.DataFrame, figsize=(WIDTH_SINGLE, 2.6)):
-    """Which normalisation preserves a genome-wide mark loss, and which erases it."""
+    """Which normalisation preserves a genome-wide mark loss, and which erases it.
+
+    Green bars preserve the loss, red bars erase it. Dashed line: the biological effect is
+    untouched (1.0). Dotted line: the effect is fully absorbed by the size factor.
+    """
     fig, ax = _new_fig(*figsize)
     x = np.arange(len(table))
     vals = table["biology_absorbed"].to_numpy()
@@ -818,28 +838,17 @@ def plot_normalization_experiment(table: pd.DataFrame, figsize=(WIDTH_SINGLE, 2.
     ax.axhline(1.0, color=INK2, linewidth=0.6, linestyle=(0, (3, 2)), zorder=4)
     retention = float(table["true_retention"].iloc[0])
     ax.axhline(retention, color=MUTED, linewidth=0.5, linestyle=(0, (2, 3)), zorder=4)
-    # Spelled out, the two reference-line labels are too long to sit on their own lines
-    # without running through a bar, so they are stacked in the headroom above the bars
-    # and name their line style instead of relying on position.
-    ax.text(-0.35, 1.26, "dashed line: correct, the biological effect is untouched",
-            fontsize=FS_ANNOT, color=INK2, ha="left", va="center")
-    ax.text(-0.35, 1.14,
-            f"dotted line: the biological effect is fully absorbed ({retention:g})",
-            fontsize=FS_ANNOT, color=MUTED, ha="left", va="center")
-
-    for xi, v, o in zip(x, vals, ok):
-        ax.text(xi, v + 0.03, f"{v:.2f}", ha="center", fontsize=FS_TICK, color=INK2)
-        ax.text(xi, 0.04, "preserved" if o else "erased", ha="center", fontsize=FS_ANNOT,
-                color=INK, weight="bold")
+    if ANNOTATE_VALUES:
+        for xi, v in zip(x, vals):
+            ax.text(xi, v + 0.03, f"{v:.2f}", ha="center", fontsize=FS_TICK, color=INK2)
 
     ax.set_xticks(x)
     ax.set_xticklabels([NORMALIZATION_DISPLAY_NAMES.get(m, m) for m in table["method"]],
                        fontsize=FS_TICK, color=INK2)
-    ax.set_xlabel("normalisation method", fontsize=FS_LABEL)
-    ax.set_ylabel("fraction of the biological effect surviving", fontsize=FS_LABEL)
-    ax.set_ylim(0, 1.36)
+    ax.set_ylabel("Effect surviving (fraction)", fontsize=FS_LABEL)
+    ax.set_ylim(0, 1.12)
     ax.set_yticks([0.0, 0.2, 0.4, 0.6, 0.8, 1.0])
-    _title(ax, "Normalisation under genome-wide H3K27me3 loss",
+    _title(ax, "Normalisation",
            "the size factor should absorb sequencing depth only, never the drug effect")
     fig.tight_layout()
     return fig
@@ -854,19 +863,16 @@ def plot_binarization_loss(table: pd.DataFrame, figsize=(WIDTH_SINGLE, 2.6)):
     # Both annotations go above the bar: spelled out, "% of bins called present" is wider
     # than a bar and would spill over its edges if set inside one.
     top = float(fold.max())
-    for xi, v, f in zip(x, fold, table["frac_present"]):
-        ax.annotate(f"{f:.0%} of bins\ncalled present", xy=(xi, v), xytext=(0, 3),
-                    textcoords="offset points", ha="center", va="bottom",
-                    fontsize=FS_CELL, color=MUTED, linespacing=1.3)
-        ax.annotate(f"{v:.1f}-fold", xy=(xi, v), xytext=(0, 15),
-                    textcoords="offset points", ha="center", va="bottom",
-                    fontsize=FS_TICK, color=INK2)
-    ax.set_ylim(0, top * 1.34)
+    if ANNOTATE_VALUES:
+        for xi, v in zip(x, fold):
+            ax.annotate(f"{v:.1f}", xy=(xi, v), xytext=(0, 2),
+                        textcoords="offset points", ha="center", va="bottom",
+                        fontsize=FS_TICK, color=INK2)
+    ax.set_ylim(0, top * 1.1)
     ax.set_xticks(x)
     ax.set_xticklabels(table["mark"], rotation=45, ha="right", fontsize=FS_TICK, color=INK2)
-    ax.set_xlabel("histone mark", fontsize=FS_LABEL)
-    ax.set_ylabel("fold range collapsed onto a single \"present\" call", fontsize=FS_LABEL)
-    _title(ax, "Information discarded by binarisation",
+    ax.set_ylabel("Fold range called \"present\"", fontsize=FS_LABEL)
+    _title(ax, "Binarisation loss",
            "among bins called present, the ratio of the largest to the smallest read count")
     fig.tight_layout()
     return fig
@@ -882,16 +888,16 @@ def plot_model_selection(table: pd.DataFrame, figsize=(WIDTH_MID, 2.2)):
                  linewidth=0.5, color="#2a78d6", markeredgecolor=SURFACE, markeredgewidth=0.5)
     best = table.loc[table["heldout_loglik_per_bin"].idxmax(), "n_states"]
     axes[0].axvline(best, color=MUTED, linewidth=0.5, linestyle=(0, (3, 3)))
-    axes[0].set_xlabel("number of chromatin states", fontsize=FS_LABEL)
-    axes[0].set_ylabel("held-out log-likelihood per bin", fontsize=FS_LABEL)
+    axes[0].set_xlabel("States (K)", fontsize=FS_LABEL)
+    axes[0].set_ylabel("Log-likelihood per bin", fontsize=FS_LABEL)
     _title(axes[0], "Held-out likelihood",
            f"best number of states = {best} (recommended criterion)")
 
     axes[1].plot(table["n_states"], table["bic"], marker="o", markersize=3, linewidth=0.5,
                  color="#eb6834", markeredgecolor=SURFACE, markeredgewidth=0.5)
-    axes[1].set_xlabel("number of chromatin states", fontsize=FS_LABEL)
-    axes[1].set_ylabel("Bayesian information criterion\n(lower is better)", fontsize=FS_LABEL)
-    _title(axes[1], "Bayesian information criterion",
+    axes[1].set_xlabel("States (K)", fontsize=FS_LABEL)
+    axes[1].set_ylabel("BIC", fontsize=FS_LABEL)
+    _title(axes[1], "BIC",
            "over-penalises: adjacent bins are not independent")
 
     fig.tight_layout()
@@ -929,7 +935,7 @@ def plot_change_volcano(
     table: pd.DataFrame,
     noise_floor: Optional[float] = None,
     fdr: float = 0.05,
-    label_top: int = 8,
+    label_top: int = 3,
     figsize=(WIDTH_SINGLE, 2.8),
 ):
     """Effect size against significance for a differential test, with the noise floor.
@@ -944,44 +950,43 @@ def plot_change_volcano(
 
     if "qvalue" in table.columns:
         q = table["qvalue"].to_numpy(dtype=float)
-        y = -np.log10(np.clip(q, 1e-12, 1.0))
-        ylabel = "statistical significance, -log10(q)"
+        y = -np.log10(np.clip(q, 1e-300, 1.0))
+        ylabel = "−log10 q"
     else:
         y = np.zeros_like(effect)
-        ylabel = "no p-values available (too few replicates)"
+        ylabel = "No p-values (too few replicates)"
 
     above = effect > noise_floor if noise_floor is not None else np.ones_like(effect, bool)
     sig = (table["qvalue"].to_numpy() < fdr) if "qvalue" in table.columns else np.zeros_like(above)
     confident = above & sig
 
     ax.scatter(effect[~confident], y[~confident], s=4, linewidths=0, alpha=0.55,
-               color="#b8b6ae", zorder=3, label="not confident")
+               color="#b8b6ae", zorder=3)
     if confident.any():
         ax.scatter(effect[confident], y[confident], s=6, linewidths=0, alpha=0.9,
-                   color="#2a78d6", zorder=4, label="clears both thresholds")
+                   color="#2a78d6", zorder=4, label="Confident")
 
     if noise_floor is not None:
         ax.axvline(noise_floor, color="#e34948", linewidth=0.6, linestyle=(0, (3, 2)), zorder=5)
-        ax.text(noise_floor, ax.get_ylim()[1], "  replicate noise floor", color=INK,
+        ax.text(noise_floor, ax.get_ylim()[1], "  Noise floor", color=INK,
                 fontsize=FS_ANNOT, va="top", ha="left")
     if "qvalue" in table.columns:
         ax.axhline(-np.log10(fdr), color=MUTED, linewidth=0.6, linestyle=(0, (2, 3)), zorder=5)
-        ax.text(ax.get_xlim()[1], -np.log10(fdr), f"false discovery rate {fdr:g}  ",
+        ax.text(ax.get_xlim()[1], -np.log10(fdr), f"FDR {fdr:g}  ",
                 color=MUTED, fontsize=FS_ANNOT, va="bottom", ha="right")
 
     if label_top and "name" in table.columns and confident.any():
         order = [i for i in np.argsort(-(effect * (y + 1)) * confident)[:label_top] if confident[i]]
         _stagger_labels(ax, [(effect[i], y[i], str(table["name"].iloc[i])) for i in order])
 
-    ax.set_xlabel("effect size: fraction of state identity that moved", fontsize=FS_LABEL)
+    ax.set_xlabel("Change in state composition", fontsize=FS_LABEL)
     ax.set_ylabel(ylabel, fontsize=FS_LABEL)
     n_conf = int(confident.sum())
-    _title(ax, "Confident state changes",
+    _title(ax, "Change per region",
            f"{n_conf} of {len(table)} regions clear both the replicate noise floor "
            f"and the false-discovery threshold")
-    leg = ax.legend(frameon=False, fontsize=FS_LEGEND, loc="lower right")
-    for t in leg.get_texts():
-        t.set_color(INK2)
+    if confident.any():
+        ax.legend(frameon=False, fontsize=FS_LEGEND, loc="lower right")
     fig.tight_layout()
     return fig
 
@@ -996,18 +1001,15 @@ def plot_noise_floor(noise_floor, contrast_effect: Optional[np.ndarray] = None,
     fig, ax = _new_fig(*figsize)
     bins = np.linspace(0, 1, 60)
     ax.hist(noise_floor.distribution, bins=bins, color="#b8b6ae", edgecolor=SURFACE,
-            linewidth=0.4, label="between replicates of one condition", zorder=3)
+            linewidth=0.4, label="Replicates", zorder=3)
     if contrast_effect is not None:
         ax.hist(np.asarray(contrast_effect), bins=bins, color="#2a78d6", alpha=0.68,
-                edgecolor=SURFACE, linewidth=0.4, label="between conditions", zorder=4)
+                edgecolor=SURFACE, linewidth=0.4, label="Conditions", zorder=4)
     ax.axvline(noise_floor.threshold, color="#e34948", linewidth=0.75,
                linestyle=(0, (3, 2)), zorder=5)
-    ax.text(noise_floor.threshold, ax.get_ylim()[1] * 0.96,
-            f"  {noise_floor.quantile:.0%} of replicate noise below {noise_floor.threshold:.2f}",
-            color=INK, fontsize=FS_ANNOT, va="top")
-    ax.set_xlabel("fraction of state identity that moved", fontsize=FS_LABEL)
-    ax.set_ylabel("number of bins", fontsize=FS_LABEL)
-    _title(ax, "Replicate noise floor",
+    ax.set_xlabel("Change in state composition", fontsize=FS_LABEL)
+    ax.set_ylabel("Bins", fontsize=FS_LABEL)
+    _title(ax, "Noise floor",
            "anything the two distributions share is not evidence of a condition effect")
     leg = ax.legend(frameon=False, fontsize=FS_LEGEND, loc="upper right")
     for t in leg.get_texts():
@@ -1056,9 +1058,9 @@ def plot_expression_link(
         axes[0].plot(xs, np.polyval(coef, xs), color=INK2, linewidth=0.75,
                      linestyle=(0, (3, 2)), zorder=4)
     label = full_state_name(state.replace("delta_", ""))
-    axes[0].set_xlabel(f"change in {label} occupancy at the promoter", fontsize=FS_LABEL)
-    axes[0].set_ylabel("change in expression, log2 fold change", fontsize=FS_LABEL)
-    _title(axes[0], "Chromatin change against expression change",
+    axes[0].set_xlabel("Change in promoter occupancy", fontsize=FS_LABEL)
+    axes[0].set_ylabel("Expression change (log2)", fontsize=FS_LABEL)
+    _title(axes[0], label,
            f"{int(ok.sum())} genes; association only, direction of causality not identified")
 
     if association is not None and len(association):
@@ -1077,12 +1079,14 @@ def plot_expression_link(
         axes[1].set_yticklabels(names, fontsize=FS_TICK, color=INK2)
         if "significant" in assoc.columns:
             for p, v, sig in zip(pos, vals, assoc["significant"]):
+                if not ANNOTATE_VALUES and not bool(sig):
+                    continue
                 axes[1].text(v + (0.01 if v >= 0 else -0.01), p,
-                             f"{v:.2f}" + ("*" if bool(sig) else ""),
+                             (f"{v:.2f}" if ANNOTATE_VALUES else "") + ("*" if bool(sig) else ""),
                              va="center", ha="left" if v >= 0 else "right",
                              fontsize=FS_ANNOT, color=INK2)
-        axes[1].set_xlabel("Spearman correlation with expression change", fontsize=FS_LABEL)
-        _title(axes[1], "Every state, not just the best one",
+        axes[1].set_xlabel("Spearman with expression change", fontsize=FS_LABEL)
+        _title(axes[1], "All states",
                "* marks associations passing the false-discovery threshold")
     else:
         axes[1].axis("off")
@@ -1093,6 +1097,8 @@ def plot_expression_link(
 
 def plot_gene_trace(trace: Dict[str, object], palette: str = DEFAULT_PALETTE, figsize=(WIDTH_DOUBLE, 4.2)):
     """One gene, end to end: signal, state composition per sample, and mark attribution.
+
+    In the signal panel the first sample is drawn solid and the others dashed.
 
     The traceability figure. Top panel is the normalised signal for every mark across the
     feature; middle is each sample's state composition over the same bins; bottom is the
@@ -1120,14 +1126,12 @@ def plot_gene_trace(trace: Dict[str, object], palette: str = DEFAULT_PALETTE, fi
                     linestyle="-" if si == 0 else (0, (3, 2)),
                     color=CVD_PALETTE[j % len(CVD_PALETTE)],
                     label=mark if si == 0 else None)
-    ax.set_ylabel("normalised\nread count", fontsize=FS_LABEL)
-    ax.set_xlabel(f"position on {bins['chrom'].iloc[0]} (kilobases)", fontsize=FS_LABEL)
+    ax.set_ylabel("Normalised\nsignal", fontsize=FS_LABEL)
+    ax.set_xlabel(f"Position on {bins['chrom'].iloc[0]} (kb)", fontsize=FS_LABEL)
     leg = ax.legend(frameon=False, fontsize=FS_LEGEND, ncol=min(len(marks), 6),
                     loc="lower left", bbox_to_anchor=(0, 1.02))
     for t in leg.get_texts():
         t.set_color(INK2)
-    ax.text(1.0, 1.02, "solid = first sample, dashed = the others", transform=ax.transAxes,
-            ha="right", va="bottom", fontsize=FS_SUBTITLE, color=MUTED)
 
     ax = axes[1]
     _style_axes(ax, grid_axis="x")
@@ -1143,7 +1147,7 @@ def plot_gene_trace(trace: Dict[str, object], palette: str = DEFAULT_PALETTE, fi
     ax.set_yticks(np.arange(len(samples)))
     ax.set_yticklabels(samples, fontsize=FS_TICK, color=INK2)
     ax.set_xlim(0, 1)
-    ax.set_xlabel("state composition over the feature", fontsize=FS_LABEL)
+    ax.set_xlabel("State composition", fontsize=FS_LABEL)
     # Outside to the right: the spelled-out state names are far too wide to sit under the
     # panel without colliding with the attribution axes below it.
     leg = ax.legend(frameon=False, fontsize=FS_LEGEND, loc="upper left",
@@ -1162,8 +1166,7 @@ def plot_gene_trace(trace: Dict[str, object], palette: str = DEFAULT_PALETTE, fi
     ax.axvline(0, color=AXIS, linewidth=0.5, zorder=4)
     ax.set_yticks(np.arange(len(names)))
     ax.set_yticklabels(names, fontsize=FS_TICK, color=INK2)
-    ax.set_xlabel("evidence for the called state over the runner-up, natural log units",
-                  fontsize=FS_LABEL)
+    ax.set_xlabel("Evidence for the call (nats)", fontsize=FS_LABEL)
 
     fig.suptitle(f"{trace['name']} — {trace['part']}", color=INK, fontsize=FS_TITLE,
                  x=0.02, ha="left", y=0.995)
@@ -1271,15 +1274,15 @@ def plot_state_percentages(
         ax.bar(x, v, bottom=bottom, color=colors[lbl], edgecolor=SURFACE, linewidth=0.4,
                width=0.7, label=full_state_name(lbl), zorder=3)
         for xi, (b, h) in enumerate(zip(bottom, v)):
-            if h >= 6:
+            if ANNOTATE_VALUES and h >= 6:
                 ax.text(xi, b + h / 2, f"{h:.0f}%", ha="center", va="center", fontsize=FS_CELL,
                         color=INK)
         bottom += v
     ax.set_xticks(x)
     ax.set_xticklabels(wide.index, rotation=0, fontsize=FS_TICK)
-    ax.set_ylabel("% of scored bases" if value.startswith("pct") else value, fontsize=FS_LABEL)
+    ax.set_ylabel("Share of genome (%)" if value.startswith("pct") else value, fontsize=FS_LABEL)
     ax.set_ylim(0, max(bottom.max() * 1.02, 1))
-    _title(ax, "State composition by base pair",
+    _title(ax, "State composition",
            "share of the scored genome in each state"
            + (", from posterior mass" if value == "pct_soft" else ", from hard calls"))
     leg = ax.legend(frameon=False, fontsize=FS_LEGEND, loc="upper left", bbox_to_anchor=(1.01, 1.0),
@@ -1328,7 +1331,7 @@ def plot_state_strength(
     ax.axhline(0, color=INK, linewidth=0.5)
     ax.set_xticks(x)
     ax.set_xticklabels(state_labels(order), rotation=45, ha="right", fontsize=FS_TICK)
-    ax.set_ylabel("state strength (log fold over typical)", fontsize=FS_LABEL)
+    ax.set_ylabel("Strength (log fold)", fontsize=FS_LABEL)
     _title(ax, "State strength",
            "posterior-weighted mean intensity of each state; hatching distinguishes "
            + ("conditions" if key == "condition" else "samples"))
@@ -1359,8 +1362,8 @@ def plot_condition_differences(
     colors = _label_colors(order, seg, palette)
     fig, axes = plt.subplots(1, 2, figsize=figsize, facecolor=SURFACE)
     for ax, col, ylabel, title in (
-        (axes[0], "delta_pct_soft", "change in % of genome (percentage points)", "Amount"),
-        (axes[1], "delta_strength", "change in strength (log fold)", "Strength"),
+        (axes[0], "delta_pct_soft", "Change in genome share (points)", "Amount"),
+        (axes[1], "delta_strength", "Change in strength (log fold)", "Strength"),
     ):
         _style_axes(ax)
         n = len(conds)
@@ -1371,16 +1374,17 @@ def plot_condition_differences(
             ax.bar(x - 0.4 + w * (i + 0.5), sub[col].to_numpy(dtype=float), w,
                    color=[colors[s] for s in order], edgecolor=INK, linewidth=0.4,
                    alpha=1.0 - 0.5 * i / max(n - 1, 1), zorder=3)
-            if n > 1:
-                for xi, v in zip(x, sub[col].to_numpy(dtype=float)):
-                    if np.isfinite(v):
-                        ax.text(xi - 0.4 + w * (i + 0.5), v, c, rotation=90, fontsize=FS_CELL - 0.5,
-                                ha="center", va="bottom" if v >= 0 else "top", color=INK)
+        if n > 1 and ax is axes[1]:
+            # one key for the shading, in place of a condition name on every bar
+            handles = [Patch(facecolor="#77756f", edgecolor=INK, linewidth=0.4,
+                             alpha=1.0 - 0.5 * i / max(n - 1, 1), label=str(c))
+                       for i, c in enumerate(conds)]
+            ax.legend(handles=handles, frameon=False, fontsize=FS_LEGEND, loc="best")
         ax.axhline(0, color=INK, linewidth=0.5)
         ax.set_xticks(x)
         ax.set_xticklabels(state_labels(order), rotation=45, ha="right", fontsize=FS_TICK)
         ax.set_ylabel(ylabel, fontsize=FS_LABEL)
-        _title(ax, f"{title} versus {ref}", f"conditions: {', '.join(conds)}")
+        _title(ax, f"{title} vs {ref}", f"conditions: {', '.join(conds)}")
     fig.tight_layout()
     return fig
 
@@ -1456,7 +1460,7 @@ def plot_alluvial(
     xs = np.linspace(0.0, 1.0, n_stages)
 
     # ribbons between consecutive stages, stacked within each node in path order
-    tab = tab.sort_values([stages[0]] + stages[1:], key=lambda c: c.map({l: i for i, l in enumerate(labels_seen)}))
+    tab = tab.sort_values([stages[0]] + stages[1:], key=lambda c: c.map({lbl: i for i, lbl in enumerate(labels_seen)}))
     for i in range(n_stages - 1):
         a, b = stages[i], stages[i + 1]
         offs_a = {lbl: y for lbl, (y, _) in node_pos[i].items()}
@@ -1464,7 +1468,7 @@ def plot_alluvial(
         pair = tab.groupby([a, b], sort=False)[weight].sum().reset_index()
         pair["first"] = tab.groupby([a, b], sort=False)[stages[0]].first().to_numpy()
         pair = pair.sort_values(
-            [a, b], key=lambda c: c.map({l: k for k, l in enumerate(labels_seen)}))
+            [a, b], key=lambda c: c.map({lbl: k for k, lbl in enumerate(labels_seen)}))
         # left-side offsets follow the source order, right-side offsets the target order
         left_cursor = dict(offs_a)
         right_cursor = dict(offs_b)
@@ -1494,7 +1498,7 @@ def plot_alluvial(
                                        facecolor=colors[lbl], edgecolor=INK, linewidth=0.4, zorder=3))
             if label_nodes and h >= 0.03:
                 share = 100.0 * h / usable
-                txt = f"{full_state_name(lbl)}\n{share:.0f}%{unit}"
+                txt = full_state_name(lbl) + (f"\n{share:.0f}%{unit}" if ANNOTATE_VALUES else "")
                 ha = "right" if i == 0 else ("left" if i == n_stages - 1 else "center")
                 x = xs[i] - node_width / 2 - 0.01 if i == 0 else (
                     xs[i] + node_width / 2 + 0.01 if i == n_stages - 1 else xs[i])
@@ -1546,7 +1550,7 @@ def plot_pattern_counts(counts: pd.DataFrame, by: str = "pattern", top: int = 20
     ax.set_yticks(np.arange(len(sub)))
     ax.set_yticklabels([" > ".join(full_state_name(p) for p in str(v).split(">")) if by == "pattern" else str(v)
                         for v in sub[by]], fontsize=FS_TICK)
-    ax.set_xlabel("genes", fontsize=FS_LABEL)
+    ax.set_xlabel("Genes", fontsize=FS_LABEL)
     _title(ax, f"Gene {by}s", f"top {len(sub)} of {len(counts)}")
     fig.tight_layout()
     return fig
@@ -1569,8 +1573,8 @@ def plot_enhancer_contributions(
            color=np.where(y >= 0, "#e34948", "#2a78d6"), edgecolor=INK, linewidth=0.3, zorder=3)
     ax.axvline(0, color=INK, linewidth=0.5, linestyle=":")
     ax.axhline(0, color=INK, linewidth=0.5)
-    ax.set_xlabel("distance from TSS (kb, negative = upstream)", fontsize=FS_LABEL)
-    ax.set_ylabel("importance (predicted expression lost)", fontsize=FS_LABEL)
+    ax.set_xlabel("Distance from TSS (kb)", fontsize=FS_LABEL)
+    ax.set_ylabel("Importance", fontsize=FS_LABEL)
     name = str(sub["name"].iloc[0])
     _title(ax, f"Enhancers of {name}", "in-silico deletion through the promoter + enhancer model"
            + (f", {sample}" if sample else ""))
@@ -1626,8 +1630,8 @@ def plot_state_tests(
     ax.axhline(0, color=INK, linewidth=0.5)
     ax.set_xticks(x)
     ax.set_xticklabels(state_labels(order), rotation=45, ha="right", fontsize=FS_TICK)
-    ax.set_ylabel("change in % of genome (percentage points)", fontsize=FS_LABEL)
-    _title(ax, f"State share versus {ref}",
+    ax.set_ylabel("Change in genome share (points)", fontsize=FS_LABEL)
+    _title(ax, f"State share vs {ref}",
            "bars = difference, whiskers = 95% block-bootstrap interval, stars = replicate "
            "t-test FDR (brackets: block bootstrap when replicates are missing)"
            + (f"; shading: {', '.join(conds)}" if n > 1 else ""))
@@ -1639,7 +1643,7 @@ def plot_state_importance(
     table: pd.DataFrame,
     seg: Optional[Segmentation] = None,
     palette: str = DEFAULT_PALETTE,
-    title: str = "Which states explain expression",
+    title: str = "State importance",
     figsize=(WIDTH_SINGLE, 2.8),
 ):
     """Unique held-out R² per state with its bootstrap interval, coloured by state and
@@ -1661,13 +1665,14 @@ def plot_state_importance(
     ax.barh(y, v, color=[colors[s] for s in order], edgecolor=INK, linewidth=0.4, zorder=3)
     ax.errorbar(v, y, xerr=np.vstack([np.clip(lo, 0, None), np.clip(hi, 0, None)]), fmt="none",
                 ecolor=INK, elinewidth=0.5, capsize=1.5, zorder=4)
-    for yy, vv, d, rho in zip(y, v, tab["direction"], tab["marginal_rho"]):
-        ax.text(max(vv, 0) + 0.005, yy, f"{'+' if d >= 0 else '−'}  ρ={rho:.2f}", va="center",
-                ha="left", fontsize=FS_CELL, color=INK)
+    if ANNOTATE_VALUES:
+        for yy, vv, d, rho in zip(y, v, tab["direction"], tab["marginal_rho"]):
+            ax.text(max(vv, 0) + 0.005, yy, f"{'+' if d >= 0 else '−'}  ρ={rho:.2f}", va="center",
+                    ha="left", fontsize=FS_CELL, color=INK)
     ax.axvline(0, color=INK, linewidth=0.5)
     ax.set_yticks(y)
     ax.set_yticklabels(state_labels(order), fontsize=FS_TICK)
-    ax.set_xlabel("unique held-out R² (lost when the state is permuted)", fontsize=FS_LABEL)
+    ax.set_xlabel("Held-out R² lost on permutation", fontsize=FS_LABEL)
     _title(ax, title, "sign = direction of association; ρ = single-state held-out Spearman")
     fig.tight_layout()
     return fig
@@ -1688,15 +1693,170 @@ def plot_part_ranking(parts: pd.DataFrame, figsize=(WIDTH_SINGLE, 2.4)):
     v = tab["spearman"].to_numpy(dtype=float)
     lo = v - tab["rho_lo"].to_numpy(dtype=float)
     hi = tab["rho_hi"].to_numpy(dtype=float) - v
-    names = {"P": "promoter", "E": "enhancer space", "B": "gene body"}
+    names = {"P": "Promoter", "E": "enhancers", "B": "gene body"}
     labels = [" + ".join(names.get(p, p) for p in str(s).split("+")) for s in tab["parts"]]
+    labels = [lbl[:1].upper() + lbl[1:] for lbl in labels]
     col = ["#AE231B" if "E" in str(s).split("+") else "#395493" for s in tab["parts"]]
     ax.barh(y, v, color=col, edgecolor=INK, linewidth=0.4, zorder=3)
     ax.errorbar(v, y, xerr=np.vstack([np.clip(lo, 0, None), np.clip(hi, 0, None)]), fmt="none",
                 ecolor=INK, elinewidth=0.5, capsize=1.5, zorder=4)
     ax.set_yticks(y)
     ax.set_yticklabels(labels, fontsize=FS_TICK)
-    ax.set_xlabel("held-out Spearman ρ with expression", fontsize=FS_LABEL)
-    _title(ax, "Gene parts and expression", "red = includes the enhancer space; whiskers = 95% bootstrap over genes")
+    ax.set_xlabel("Spearman, held-out genes", fontsize=FS_LABEL)
+    _title(ax, "Gene part", "red = includes the enhancer space; whiskers = 95% bootstrap over genes")
     fig.tight_layout()
     return fig
+
+
+# ---------------------------------------------------------------------------
+# Composite (multi-panel) figures at journal size
+# ---------------------------------------------------------------------------
+
+#: Panel letters: 8 pt bold lowercase, the one piece of text allowed above the 7 pt scale.
+FS_PANEL = 8.0
+#: Deepest figure that still leaves room for a legend on a Nature page.
+MAX_DEPTH_MM = 170.0
+_NATURE_WIDTHS_MM = (89.0, 120.0, 183.0)
+
+
+def figure_mm(width_mm: float = 183.0, height_mm: float = 120.0) -> plt.Figure:
+    """An empty figure of an exact print size in millimetres (default: double column).
+
+    Composite figures are laid out with ``fig.add_gridspec`` and saved with
+    :func:`save_figure`, which keeps this size exactly; a tight bounding box would let a
+    long label change the width the journal places the figure at.
+    """
+    return plt.figure(figsize=(width_mm * MM, height_mm * MM), facecolor=SURFACE)
+
+
+def panel_letter(ax: plt.Axes, letter: str, dx_mm: float = 0.0, dy_mm: float = 0.5):
+    """Put a bold lowercase panel letter at the top-left corner of the panel.
+
+    The letter is aligned to the left edge of everything the axes draws (tick and axis
+    labels included), so the letters of a row line up with the panels' visual edges
+    rather than with their data areas. ``dx_mm`` / ``dy_mm`` nudge it from there.
+    """
+    fig = ax.figure
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+    box = ax.get_tightbbox(renderer).transformed(fig.transFigure.inverted())
+    top = max(ax.get_position().y1, box.y1)
+    x = box.x0 + dx_mm * MM / fig.get_figwidth()
+    y = top + dy_mm * MM / fig.get_figheight()
+    return fig.text(x, y, letter.lower(), fontsize=FS_PANEL, fontweight="bold", color=INK,
+                    ha="left", va="bottom", gid="panel_letter")
+
+
+def save_panels(fig: plt.Figure, groups: Dict[str, Sequence], outdir: str, stem: str,
+                png_dpi: int = 600, pad_mm: float = 1.0) -> List[str]:
+    """Write each group of panels in ``fig`` as its own figure, cropped to what it draws.
+
+    ``groups`` maps a file suffix to the artists that make up one stand-alone figure:
+    usually one axes, or a few axes that share a category axis, plus any panel letters,
+    colour bars or headings that belong with them. Every other axes and figure-level text
+    is hidden while a group is saved, so neighbours never leak into the crop. Each group
+    is written as ``<stem>_<suffix>.pdf`` (vector, editable text) and, when ``png_dpi``
+    is non-zero, a PNG beside it. The text keeps its point size, so a panel that was
+    one-sixth of a composite page is read at full size on its own.
+    """
+    import os
+
+    from matplotlib.transforms import Bbox
+
+    os.makedirs(outdir, exist_ok=True)
+    enforce_text_style(fig)
+    everything = list(fig.axes) + list(fig.texts) + list(fig.legends)
+    was_visible = {id(a): a.get_visible() for a in everything}
+    paths: List[str] = []
+    for suffix, artists in groups.items():
+        keep = {id(a) for a in artists}
+        for a in everything:
+            a.set_visible(was_visible[id(a)] and id(a) in keep)
+        fig.canvas.draw()
+        renderer = fig.canvas.get_renderer()
+        boxes = [a.get_tightbbox(renderer) for a in artists if a.get_visible()]
+        # an axis label wider than its axes is not always inside the axes' tight box
+        for a in artists:
+            if isinstance(a, plt.Axes):
+                boxes += [t.get_window_extent(renderer) for t in (a.xaxis.label, a.yaxis.label, a.title)
+                          if t.get_text().strip()]
+        boxes = [b for b in boxes if b is not None and b.width > 0 and b.height > 0]
+        if not boxes:
+            continue
+        bbox = Bbox.union(boxes).transformed(fig.dpi_scale_trans.inverted()).padded(pad_mm * MM)
+        path = os.path.join(outdir, f"{stem}_{suffix}.pdf")
+        fig.savefig(path, bbox_inches=bbox, facecolor=SURFACE)
+        if png_dpi:
+            fig.savefig(path[:-4] + ".png", bbox_inches=bbox, dpi=png_dpi, facecolor=SURFACE)
+        paths.append(path)
+    for a in everything:
+        a.set_visible(was_visible[id(a)])
+    plt.close(fig)
+    return paths
+
+
+def check_nature_style(fig: plt.Figure, max_depth_mm: float = MAX_DEPTH_MM) -> List[str]:
+    """List every way ``fig`` departs from Nature's artwork rules; empty means it conforms.
+
+    Checked: width is at most a double column (183 mm) and depth at most ``max_depth_mm``;
+    every visible piece of text is black and 5-7 pt (panel letters: 8 pt bold); no drawn
+    line is thinner than 0.25 pt or thicker than 1 pt; and text will be embedded as
+    editable TrueType. The check reads the figure as drawn, so call it after layout.
+    """
+    from matplotlib.colors import to_hex
+    from matplotlib.lines import Line2D
+    from matplotlib.text import Text
+
+    problems: List[str] = []
+    width_mm = fig.get_figwidth() / MM
+    height_mm = fig.get_figheight() / MM
+    if width_mm > _NATURE_WIDTHS_MM[-1] + 0.05:
+        problems.append(f"width {width_mm:.1f} mm exceeds the 183 mm double column")
+    if height_mm > max_depth_mm + 0.05:
+        problems.append(f"depth {height_mm:.1f} mm exceeds {max_depth_mm:.0f} mm")
+    if mpl.rcParams["pdf.fonttype"] != 42:
+        problems.append("pdf.fonttype is not 42: text would be saved as outlines")
+    for t in fig.findobj(Text):
+        text = t.get_text().strip()
+        if not text or not t.get_visible():
+            continue
+        size = t.get_fontsize()
+        is_letter = t.get_gid() == "panel_letter"
+        if is_letter:
+            if abs(size - FS_PANEL) > 0.01 or t.get_fontweight() not in ("bold", 700):
+                problems.append(f"panel letter {text!r} is not 8 pt bold")
+        elif size < 5.0 - 0.01 or size > 7.0 + 0.01:
+            problems.append(f"text {text[:30]!r} is {size:.1f} pt (allowed 5-7 pt)")
+        if to_hex(t.get_color()) != "#000000":
+            problems.append(f"text {text[:30]!r} is not black")
+    for line in fig.findobj(Line2D):
+        if not line.get_visible() or line.get_linestyle() in ("None", "none", "", " "):
+            continue
+        if len(line.get_xdata()) == 0:
+            continue
+        width = line.get_linewidth()
+        if width < 0.25 - 0.01 or width > 1.0 + 0.01:
+            problems.append(f"line width {width:.2f} pt (allowed 0.25-1 pt)")
+    return sorted(set(problems))
+
+
+def save_figure(fig: plt.Figure, path: str, png: Optional[str] = None, dpi: int = 600) -> str:
+    """Save a composite figure at its exact size as a vector PDF (text kept editable).
+
+    ``png`` optionally writes a raster preview next to it (for screens and reviews; the
+    PDF is the artwork). Raises ``ValueError`` if the figure breaks the Nature rules that
+    :func:`check_nature_style` tests, so a non-conforming figure is never written quietly.
+    """
+    import os
+
+    enforce_text_style(fig)
+    problems = check_nature_style(fig)
+    if problems:
+        raise ValueError(f"{os.path.basename(path)} is not in Nature format: " + "; ".join(problems))
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    fig.savefig(path, facecolor=SURFACE)
+    if png:
+        os.makedirs(os.path.dirname(os.path.abspath(png)), exist_ok=True)
+        fig.savefig(png, dpi=dpi, facecolor=SURFACE)
+    plt.close(fig)
+    return path

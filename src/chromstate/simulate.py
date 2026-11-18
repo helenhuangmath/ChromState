@@ -191,6 +191,8 @@ def simulate(
     base_paths = [_sample_path(A, pi, n_bins, rng) for _ in range(n_chroms)]
     base_path = np.concatenate(base_paths)
 
+    # separate stream, so that adding doses does not change any other draw
+    dose_rank = np.random.default_rng(seed + 7919).random(len(base_path))
     from_idx = labels.index(from_state) if from_state in labels else None
     to_idx = labels.index(to_state) if to_state in labels else None
     responder = np.zeros(len(base_path), dtype=bool)
@@ -221,7 +223,10 @@ def simulate(
         path = base_path.copy()
         is_treated = sample in treated_set
         if is_treated and to_idx is not None:
-            path[responder] = to_idx
+            # ``sample_dose``: fraction of the responders that switch in this sample
+            # (nested, so a lower dose is a subset of a higher one). Default: all.
+            dose = float(perturbation.get("sample_dose", {}).get(sample, 1.0))
+            path[responder & (dose_rank < dose)] = to_idx
 
         mean = emis[path].copy()  # (n_rows, M)
         if blur > 0 and blurred.any():

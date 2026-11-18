@@ -188,7 +188,7 @@ def test_differential_report_finds_responders(fitted, tmp_path):
     assert {"n_sig_gain", "n_sig_loss", "mean_delta"} <= set(rep.states.columns)
     # the planted perturbation moves ReprPC -> TssA in treated samples
     st = rep.states.set_index("state")
-    tssa = [l for l in seg.labels if "TssA" in l or "Tss" in l]
+    tssa = [lbl for lbl in seg.labels if "TssA" in lbl or "Tss" in lbl]
     assert tssa
     assert st.loc[tssa, "mean_delta"].sum() > 0
     # genome tests merged
@@ -227,7 +227,7 @@ def test_predict_expression_level_and_change(fitted, tmp_path):
     ds, truth, seg = fitted
     features = _features(ds)
     gq = cs.gene_quantification(seg, features)
-    tssa = next(l for l in seg.labels if "Tss" in l)
+    tssa = next(lbl for lbl in seg.labels if "Tss" in lbl)
     # expression rule: promoter occupancy of the active state, plus noise
     rng = np.random.default_rng(0)
     wide = gq.pivot(index="gene_id", columns="sample", values=f"P_occ_{tssa}")
@@ -257,7 +257,7 @@ def test_predict_cli(fitted, tmp_path):
     ds, truth, seg = fitted
     features = _features(ds)
     gq = cs.gene_quantification(seg, features)
-    tssa = next(l for l in seg.labels if "Tss" in l)
+    tssa = next(lbl for lbl in seg.labels if "Tss" in lbl)
     wide = gq.pivot(index="gene_id", columns="sample", values=f"P_occ_{tssa}")
     expr = (np.exp(3.0 * wide) - 1).rename_axis("gene_id").reset_index()
     gpath, epath = tmp_path / "gq.tsv", tmp_path / "expr.tsv"
@@ -334,7 +334,7 @@ def test_state_transfer_recovers_active_states(fitted):
     assert np.allclose(proj.posterior.sum(axis=1), 1.0)
     assert proj.labels == seg.labels
     # active states, which the proxy carries, are recovered; repressed ones are not expected to be
-    tssa = seg.labels.index(next(l for l in seg.labels if "Tss" in l and "Biv" not in l))
+    tssa = seg.labels.index(next(lbl for lbl in seg.labels if "Tss" in lbl and "Biv" not in lbl))
     truth_active = seg.states == tssa
     called = proj.states == tssa
     recall = (truth_active & called).sum() / max(truth_active.sum(), 1)

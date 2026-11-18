@@ -583,7 +583,7 @@ class ScoreTensor:
         acc: dict = {}
         cnt: dict = {}
         for rec in regions.itertuples(index=False):
-            chrom = str(getattr(rec, "chrom"))
+            chrom = str(rec.chrom)
             if chrom not in self.chrom_bins:
                 continue
             block = self.window(chrom, int(rec.start), int(rec.end))

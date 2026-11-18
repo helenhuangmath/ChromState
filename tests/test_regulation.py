@@ -147,6 +147,7 @@ def test_folds_keep_stacked_gene_copies_together():
     # Level task stacks samples: gene g appears once per sample, all on one chromosome.
     # Fallback blocks must be cut over unique genes, or a gene's copies leak across folds.
     import numpy as np
+
     from chromstate.regulation import _folds
 
     genes = np.array([f"g{i}" for i in range(60)])
