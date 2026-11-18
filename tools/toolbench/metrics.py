@@ -110,6 +110,58 @@ def _magnitude(ctx: EvalContext) -> Dict[str, float]:
     return {"signal_spearman": float(out["spearman"]), "signal_pearson": float(out["pearson"])}
 
 
+def _bivalency_posthoc(ctx: EvalContext) -> Dict[str, float]:
+    """Bivalency AUPRC with one scoring rule for every tool, from its partition alone.
+
+    The ``bivalency`` metric scores whatever ``bivalency_score`` a run carries: in-process
+    methods derive it from their own fitted emission means, external tools from the
+    post-hoc profile in :mod:`toolbench.scores`. Those are different inputs to the same
+    formula, so a gap between an internal and an external row could come from the
+    scoring route rather than the segmentation. This metric removes that: every run --
+    internal or external -- is re-scored with :func:`toolbench.scores.posthoc_scores` on
+    its own states (and posterior, where it has a proper state posterior).
+    """
+    from .scores import posthoc_scores
+
+    truth = ctx.truth
+    if getattr(truth, "bivalent_state", None) is None or ctx.run.n_states <= 1:
+        return {}
+    post = ctx.run.posterior
+    if post is not None and post.shape[1] != ctx.run.n_states:
+        post = None
+    biv, _ = posthoc_scores(ctx.ds, ctx.run.states, post, ctx.run.n_states)
+    positive = np.asarray(truth.states) == truth.bivalent_state
+    det = M.detection_scores(biv, positive)
+    return {"biv_posthoc_auprc": float(det["auprc"]), "biv_posthoc_auroc": float(det["auroc"])}
+
+
+def _domains(ctx: EvalContext) -> Dict[str, float]:
+    """diHMM's domain-level labels, described -- the simulator has no domain truth.
+
+    Reports how many domain states are used and how long domain segments are, plus the
+    adjusted Rand index of domain labels against the *bin-level* truth, which is only a
+    description of how much bin-state information the coarser layer carries.
+    """
+    dom = ctx.run.meta.get("domain_states") if ctx.run.meta else None
+    if dom is None:
+        return {}
+    dom = np.asarray(dom)
+    keep = dom != UNASSIGNED
+    bins = ctx.ds.bins.reset_index(drop=True)
+    bin_size = int(bins["end"].iloc[0] - bins["start"].iloc[0])
+    n_seg = 0
+    for _, grp in bins.groupby(["sample", "chrom"], sort=False):
+        seq = dom[grp.index.to_numpy()]
+        seq = seq[seq != UNASSIGNED]
+        n_seg += (1 + int((seq[1:] != seq[:-1]).sum())) if seq.size else 0
+    out = {"domain_states_used": float(len(np.unique(dom[keep]))),
+           "domain_mean_segment_kb": float(keep.sum() * bin_size / max(n_seg, 1) / 1e3)}
+    if ctx.truth is not None:
+        out["domain_ari_vs_bin_truth"] = float(M.segmentation_agreement(
+            np.asarray(ctx.truth.states)[keep], dom[keep])["ari"])
+    return out
+
+
 def _calibration(ctx: EvalContext) -> Dict[str, float]:
     true = ctx.true_states()
     post = ctx.run.posterior
@@ -199,6 +251,56 @@ def _confidence_shape(ctx: EvalContext) -> Dict[str, float]:
     }
 
 
+def _perturbation(ctx: EvalContext) -> Dict[str, float]:
+    """Detection of the bins the simulated perturbation moved (responders).
+
+    Score per bin = change between the control and treated samples: total-variation
+    distance of the posteriors when the tool reports them, otherwise 0/1 for a changed
+    hard call. AUPRC/AUROC against ``truth.responder_mask``; the baseline is the
+    responder fraction. A tool without posteriors can only reach one point on the
+    precision-recall curve, which is itself part of what the metric shows.
+    """
+    truth = ctx.truth
+    ds = ctx.ds
+    resp = getattr(truth, "responder_mask", None)
+    treated = list(getattr(truth, "treated", []) or [])
+    if resp is None or not treated or not np.any(resp):
+        return {}
+    samples = list(ds.samples)
+    controls = [s for s in samples if s not in treated]
+    if not controls:
+        return {}
+    masks = {s: ds.sample_mask(s) for s in samples}
+    n = int(masks[controls[0]].sum())
+    if any(int(masks[s].sum()) != n for s in samples):
+        return {}
+    states = ctx.run.states
+    post = ctx.run.posterior
+    if post is not None:
+        pa = np.mean([post[masks[s]] for s in controls], axis=0)
+        pb = np.mean([post[masks[s]] for s in treated], axis=0)
+        score = 0.5 * np.abs(pa - pb).sum(axis=1)
+    else:
+        sa = np.stack([states[masks[s]] for s in controls])
+        sb = np.stack([states[masks[s]] for s in treated])
+        score = (sa[:, None, :] != sb[None, :, :]).mean(axis=(0, 1))
+    assigned = np.ones(n, dtype=bool)
+    for s in samples:
+        assigned &= states[masks[s]] != UNASSIGNED
+    y = np.asarray(resp)[masks[controls[0]]]
+    ok = assigned & np.isfinite(score)
+    if ok.sum() < 10 or y[ok].sum() == 0:
+        return {}
+    from sklearn.metrics import average_precision_score, roc_auc_score
+
+    return {
+        "perturb_auprc": float(average_precision_score(y[ok], score[ok])),
+        "perturb_auroc": float(roc_auc_score(y[ok], score[ok])),
+        "perturb_baseline_auprc": float(y[ok].mean()),
+        "perturb_frac_called": float((score[ok] > 0.5).mean()),
+    }
+
+
 METRICS: Dict[str, Metric] = {
     "recovery": Metric(
         "recovery",
@@ -223,6 +325,34 @@ METRICS: Dict[str, Metric] = {
         ("signal_spearman", "signal_pearson"),
         ("truth", "activity"),
         _magnitude,
+    ),
+    "bivalency_posthoc": Metric(
+        "bivalency_posthoc",
+        "Bivalency AUPRC/AUROC with one scoring rule for every tool: each state's "
+        "posterior-weighted mean normalised count, then the shared harmonic-mean "
+        "formula. Separates segmentation quality from how a tool's score was derived.",
+        ("biv_posthoc_auprc", "biv_posthoc_auroc"),
+        ("truth",),
+        _bivalency_posthoc,
+    ),
+    "perturbation": Metric(
+        "perturbation",
+        "Detection of the simulated perturbation's responder bins from each tool's "
+        "control-versus-treated change (posterior total variation, or a changed hard "
+        "call): precision-recall and ROC AUC against the known responders.",
+        ("perturb_auprc", "perturb_auroc", "perturb_baseline_auprc", "perturb_frac_called"),
+        ("truth",),
+        _perturbation,
+    ),
+    "domains": Metric(
+        "domains",
+        "Descriptive summary of a second, domain-level label where a tool has one "
+        "(diHMM): domain states used, mean domain segment length, and agreement of the "
+        "domain label with the bin-level truth. Not a correctness score.",
+        ("domain_states_used", "domain_mean_segment_kb", "domain_ari_vs_bin_truth"),
+        (),
+        _domains,
+        higher_is_better=None,
     ),
     "calibration": Metric(
         "calibration",

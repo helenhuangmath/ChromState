@@ -58,6 +58,7 @@ def run_tools(
     # Without an explicit root, work goes to a temp directory rather than the current
     # one: in-process methods need no scratch space at all, and creating ./<tool>/ for
     # each of them litters whatever directory the caller happened to be in.
+    made_root = workroot is None
     root = workroot or tempfile.mkdtemp(prefix="toolbench-")
 
     runs: List[ToolRun] = []
@@ -77,6 +78,19 @@ def run_tools(
             detail = run.reason or f"{run.runtime_s:.1f}s, coverage {run.coverage:.2f}"
             print(f"[toolbench] {key}: {run.status} ({detail})")
         runs.append(run)
+    # An auto-created root that no external tool wrote into (in-process methods only,
+    # which is every test run) is removed again; otherwise every run would leave an
+    # empty ``toolbench-xxxx`` folder under TMPDIR.
+    if made_root:
+        try:
+            for key in tools:  # a skipped external tool leaves its empty folder behind
+                sub = os.path.join(root, key)
+                if os.path.isdir(sub) and not os.listdir(sub):
+                    os.rmdir(sub)
+            if not os.listdir(root):
+                os.rmdir(root)
+        except OSError:
+            pass
     return runs
 
 

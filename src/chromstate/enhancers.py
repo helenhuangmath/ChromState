@@ -631,9 +631,28 @@ def _ring_index(distance: np.ndarray, rings: Sequence[int]) -> np.ndarray:
     return idx
 
 
+def _ring_edge_label(bp: int, kb: bool) -> str:
+    bp = int(bp)
+    if bp == 0:
+        return "0"
+    return f"{bp // 1000}" if kb else (f"{bp // 1000}kb" if bp % 1000 == 0 else f"{bp}bp")
+
+
 def ring_columns(rings: Sequence[int] = DEFAULT_RINGS) -> List[str]:
-    """Column names :func:`gene_enhancer_features` uses for each distance ring."""
-    return [f"enh_{lo // 1000}_{hi // 1000}kb" for lo, hi in zip(rings[:-1], rings[1:])]
+    """Column names :func:`gene_enhancer_features` uses for each distance ring.
+
+    Edges that are all whole kilobases keep the historical ``enh_<lo>_<hi>kb`` form
+    (``enh_0_10kb``). Any other edge (a 400 bp ring around a short regulatory window,
+    say) is written in base pairs, so two different rings never share a name.
+    """
+    rings = [int(r) for r in rings]
+    if len(set(rings)) != len(rings) or rings != sorted(rings):
+        raise ValueError(f"rings must be strictly increasing, got {tuple(rings)}")
+    kb = all(r % 1000 == 0 for r in rings)
+    if kb:
+        return [f"enh_{lo // 1000}_{hi // 1000}kb" for lo, hi in zip(rings[:-1], rings[1:])]
+    return [f"enh_{_ring_edge_label(lo, False)}_{_ring_edge_label(hi, False)}"
+            for lo, hi in zip(rings[:-1], rings[1:])]
 
 
 def gene_enhancer_features(
@@ -781,6 +800,73 @@ def enhancer_importance(
     out["rank_in_gene"] = (out.groupby(["gene_id", "sample"])["importance"]
                               .rank(ascending=False, method="first").astype(int))
     return out.sort_values("importance", ascending=False).reset_index(drop=True)
+
+
+class MonotoneLinear:
+    """Linear model with sign constraints per column, for small gene tables.
+
+    ``monotonic_cst`` follows scikit-learn: ``1`` forces a non-negative coefficient,
+    ``-1`` a non-positive one, ``0`` leaves it free. Columns are standardised before the
+    bounded least-squares fit (a small ridge ``alpha`` keeps it stable), so the
+    constraint is on the sign of the effect and not on its scale. Gradient boosting
+    needs hundreds of rows before its trees see more than one split per feature; with
+    fewer (gene, sample) rows the deletion importance it reports collapses to one
+    constant per ring. This model gives an importance proportional to the element's own
+    input, which is the right answer when the data cannot support more.
+    """
+
+    def __init__(self, monotonic_cst: Optional[Sequence[int]] = None, alpha: float = 1e-3):
+        self.monotonic_cst = None if monotonic_cst is None else np.asarray(monotonic_cst, dtype=int)
+        self.alpha = float(alpha)
+
+    def fit(self, X, y) -> "MonotoneLinear":
+        from scipy.optimize import lsq_linear
+
+        X = np.asarray(X, dtype=np.float64)
+        y = np.asarray(y, dtype=np.float64)
+        n, p = X.shape
+        mono = np.zeros(p, dtype=int) if self.monotonic_cst is None else self.monotonic_cst
+        if len(mono) != p:
+            raise ValueError(f"monotonic_cst has {len(mono)} entries for {p} columns")
+        mu, sd = X.mean(axis=0), X.std(axis=0)
+        sd = np.where(sd > 0, sd, 1.0)
+        Z = (X - mu) / sd
+        y_mean = float(y.mean())
+        A = np.vstack([Z, np.sqrt(self.alpha) * np.eye(p)])
+        b = np.concatenate([y - y_mean, np.zeros(p)])
+        lb = np.where(mono > 0, 0.0, -np.inf)
+        ub = np.where(mono < 0, 0.0, np.inf)
+        res = lsq_linear(A, b, bounds=(lb, ub), lsmr_tol="auto")
+        self.coef_ = res.x / sd
+        self.intercept_ = y_mean - float(mu @ self.coef_)
+        self.n_features_in_ = p
+        return self
+
+    def predict(self, X) -> np.ndarray:
+        X = np.asarray(X, dtype=np.float64)
+        return X @ self.coef_ + self.intercept_
+
+
+def make_importance_model(model: str, monotonic_cst: Sequence[int], n_rows: int, seed: int = 0,
+                          min_rows_for_trees: int = 200):
+    """The regression behind :func:`enhancer_importance`.
+
+    ``"hgb"`` is monotone gradient boosting, ``"linear"`` :class:`MonotoneLinear`, and
+    ``"auto"`` (the default upstream) picks boosting once there are at least
+    ``min_rows_for_trees`` (gene, sample) rows and the linear model below that.
+    """
+    mono = np.asarray(monotonic_cst, dtype=int)
+    if model == "auto":
+        model = "hgb" if n_rows >= min_rows_for_trees else "linear"
+    if model == "linear":
+        return MonotoneLinear(mono), "linear"
+    if model == "hgb":
+        from sklearn.ensemble import HistGradientBoostingRegressor
+
+        leaf = int(min(20, max(5, n_rows // 10)))
+        return HistGradientBoostingRegressor(max_iter=300, learning_rate=0.05, monotonic_cst=mono,
+                                             min_samples_leaf=leaf, random_state=seed), "hgb"
+    raise ValueError(f"model must be 'auto', 'hgb' or 'linear', got {model!r}")
 
 
 def _predict(model, X: np.ndarray, columns: Sequence[str], chunk: int) -> np.ndarray:

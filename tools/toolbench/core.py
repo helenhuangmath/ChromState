@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import shlex
 import subprocess
+import tempfile
 import time
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence
@@ -191,6 +192,11 @@ def run_command(
     ``resource.getrusage(RUSAGE_CHILDREN)``, returns a high-water mark across *all*
     children this process has ever reaped, so after the first heavyweight tool it reports
     that tool's memory for everything that follows. A wrong number is worse than none.
+
+    Output is spooled to temporary files, not pipes. The memory-polling loop does not
+    read while the tool runs, and a pipe holds only ~64 KB: a tool that logs every EM
+    iteration (diHMM does, per chromosome) fills it, blocks on its next write, and sleeps
+    forever at 0% CPU -- which looked exactly like a slow tool until the timeout.
     """
     t0 = time.time()
     peak_mb: Optional[float] = None
@@ -198,23 +204,33 @@ def run_command(
     try:
         import psutil  # type: ignore
 
-        proc = psutil.Popen(list(argv), cwd=cwd, env=env,
-                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        peak = 0.0
-        while proc.poll() is None:
-            try:
-                rss = proc.memory_info().rss
-                for child in proc.children(recursive=True):
-                    rss += child.memory_info().rss
-                peak = max(peak, rss)
-            except Exception:  # process exited between poll and read
-                pass
-            if time.time() - t0 > timeout_s:
-                proc.kill()
-                timed_out = True
-                break
-            time.sleep(0.05)
-        out, err = proc.communicate()
+        with tempfile.TemporaryFile() as fout, tempfile.TemporaryFile() as ferr:
+            proc = psutil.Popen(list(argv), cwd=cwd, env=env, stdout=fout, stderr=ferr)
+            peak = 0.0
+            while proc.poll() is None:
+                try:
+                    rss = proc.memory_info().rss
+                    for child in proc.children(recursive=True):
+                        rss += child.memory_info().rss
+                    peak = max(peak, rss)
+                except Exception:  # process exited between poll and read
+                    pass
+                if time.time() - t0 > timeout_s:
+                    # Kill the whole tree: an R or Java tool's workers outlive the parent.
+                    try:
+                        for child in proc.children(recursive=True):
+                            child.kill()
+                    except Exception:
+                        pass
+                    proc.kill()
+                    timed_out = True
+                    break
+                time.sleep(0.05)
+            proc.wait()
+            fout.seek(0)
+            ferr.seek(0)
+            out = fout.read().decode("utf-8", "replace")
+            err = ferr.read().decode("utf-8", "replace")
         peak_mb = peak / 1e6 if peak else None
         rc = proc.returncode
     except ImportError:

@@ -1,0 +1,11 @@
+--- R/kfoots.R
++++ R/kfoots.R
+@@ -332,7 +332,7 @@
+     if (length(models) != k) stop(paste0("models must be a list of length ", k))
+     for (model in models){
+         if (length(model$ps) != nrow || !isProbVector(model$ps)) stop("'ps' vector of each model must have the right length and sum up to 1")
+-        if (!(all(is.finite(c(model$mu, model$ps))) && (unlist(model) >= 0))) stop("non-finite or negative model parameters")
++        if (!(all(is.finite(c(model$mu, model$ps))) && all(unlist(model) >= 0))) stop("non-finite or negative model parameters")
+         if (nbtype=="dep" && model$r != models[[1]]$r) warning("models not consistent with the 'dep' setting")
+         if (nbtype=="pois" && model$r != Inf) warning("models not consistent with the 'pois' setting")
+     }

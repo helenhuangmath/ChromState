@@ -1,0 +1,17 @@
+--- Viterbi.h
++++ Viterbi.h
+@@ -236,10 +236,13 @@
+ 
+   for (sword i = bin_positions - 1; i >= 0; i--) {
+ 
++    // Record the state *at* position i before stepping back; upstream stored the
++    // back-pointer (the state at i - 1) here, shifting every label by one bin.
++    annotations.at(i) = std::pair<uword, uword>(max_bin_state, max_domain_state);
++
+     const std::pair<uword, uword> &prev_state =
+         sub_solutions_states.at(i).at(max_bin_state).at(max_domain_state);
+ 
+-    annotations.at(i) = prev_state;
+     max_bin_state = prev_state.first;
+     max_domain_state = prev_state.second;
+   }

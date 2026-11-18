@@ -41,9 +41,22 @@ def state_descriptions() -> dict:
                  for m, f in zip(MARKS, fold[k]) if f >= 1.5]
         out[lbl] = f"{full_state_name(lbl)} [{', '.join(parts) if parts else 'near background'}]"
     return out
+
+
+def state_order():
+    """Model states, most active first (the order every state panel is drawn in)."""
+    return ns.active_first(pd.read_csv(OUT / MODEL_DIR / "state_labels.tsv", sep="\t")["label"])
+
+
+def state_names():
+    """Plain state names for axis labels; the mark fold-enrichments of state_descriptions()
+    are for the legend and the text, not for every tick."""
+    return {lbl: full_state_name(lbl) for lbl in state_order()}
 LATER_COLORS = {"TMEM": ns.CONDITION_COLORS["Arm"], "TEX": ns.CONDITION_COLORS["Cl13"]}
 TASK_TONES = {"Level (TN)": "#9cc0ec", "Change (TMEM vs TN)": ns.ACCENT,
               "Change (TEX vs TN)": "#1b4f8f"}
+TASK_SHORT = {"Level (TN)": "Level, TN", "Change (TMEM vs TN)": "Change, TMEM vs TN",
+              "Change (TEX vs TN)": "Change, TEX vs TN"}
 
 
 def asym_panel(ax, sub: pd.DataFrame, order, names, title):
@@ -65,15 +78,11 @@ def asym_panel(ax, sub: pd.DataFrame, order, names, title):
     ax.set_yticks(y)
     ax.set_yticklabels(names)
     ax.invert_yaxis()
-    ax.set_xlabel("|chromatin → RNA| − |RNA → chromatin|\n(standardised coefficients)")
+    ax.set_xlabel("RNA leads  ←  asymmetry  →  chromatin leads")
     ax.set_title(title)
     lo_, hi_ = ax.get_xlim()
     lim = max(abs(lo_), abs(hi_))
     ax.set_xlim(-lim, lim)
-    ax.text(0.02, -0.16, "← RNA leads", transform=ax.transAxes, ha="left", va="top",
-            fontsize=5.5)
-    ax.text(0.98, -0.16, "chromatin leads →", transform=ax.transAxes, ha="right", va="top",
-            fontsize=5.5)
     ax.grid(axis="x", linewidth=0.3, color="#e6e6e6")
     ax.set_axisbelow(True)
 
@@ -91,22 +100,23 @@ def figure4():
                           bottom=0.24, top=0.9)
     ax = fig.add_subplot(gs[0])
     order = list(dict.fromkeys(marks["variable"]))
-    asym_panel(ax, marks, order, order, "Histone marks in TN")
+    asym_panel(ax, marks, order, order, "Histone marks")
     ax.legend(loc="lower right", handletextpad=0.2, borderaxespad=0.2)
     ns.panel_label(ax, "a", x=-0.45)
 
     ax = fig.add_subplot(gs[1])
-    order = list(dict.fromkeys(states["variable"]))
-    desc = state_descriptions()
-    names = [desc[v.replace(" (promoter state)", "")] for v in order]
-    asym_panel(ax, states, order, names, "ChromState promoter states in TN")
+    present = list(dict.fromkeys(states["variable"]))
+    desc = state_names()
+    order = [f"{lbl} (promoter state)" for lbl in state_order() if f"{lbl} (promoter state)" in present]
+    order += [v for v in present if v not in order]
+    names = [desc.get(v.replace(" (promoter state)", ""), v) for v in order]
+    asym_panel(ax, states, order, names, "Promoter states")
     ns.panel_label(ax, "b", x=-0.75)
 
-    fig.text(0.01, 0.015,
-             "Filled: corrected for measurement error using replicate reliabilities "
-             f"({rel_txt}); open: uncorrected (background states). Bars: 95% bootstrap CI over genes.",
-             fontsize=5.5, ha="left", va="bottom")
-    ns.save(fig, FIG, "Fig4_cross_lag")
+    # Legend text (not drawn): filled, corrected for measurement error using replicate
+    # reliabilities; open, uncorrected (background states); bars, 95% bootstrap CI over genes.
+    print(f"Fig4 replicate reliabilities: {rel_txt}")
+    ns.save(fig, FIG, "Fig4_cross_lag", groups={"a_marks": "a", "b_promoter_states": "b"})
 
 
 def figure5():
@@ -115,28 +125,30 @@ def figure5():
     gain = pd.read_csv(OUT / "importance" / "combinatorial_gain.tsv", sep="\t")
     tasks = list(TASK_TONES)
 
-    fig = plt.figure(figsize=(ns.DOUBLE, 100 * ns.MM))
-    gs = fig.add_gridspec(1, 3, width_ratios=[1.0, 0.8, 0.8], wspace=1.15, left=0.25,
+    fig = plt.figure(figsize=(ns.DOUBLE * 1.3, 100 * ns.MM))
+    gs = fig.add_gridspec(1, 3, width_ratios=[1.0, 0.8, 0.8], wspace=1.05, left=0.2,
                           right=0.97, bottom=0.2, top=0.9)
 
     # a  unique importance of each state
     ax = fig.add_subplot(gs[0])
     lvl = st.loc[st["task"] == tasks[0]].set_index("state")["unique_r2_drop"]
-    order = lvl.sort_values(ascending=False).index.tolist()
+    order = [lbl for lbl in state_order() if lbl in lvl.index]      # active TSS first
+    order += [lbl for lbl in lvl.index if lbl not in order]
     y = np.arange(len(order))
     h = 0.27
     for i, task in enumerate(tasks):
         d = st.loc[st["task"] == task].set_index("state").loc[order]
         ax.barh(y + (i - 1) * h, d["unique_r2_drop"], height=h, color=TASK_TONES[task],
-                linewidth=0, label=task)
+                linewidth=0, label=TASK_SHORT[task])
     ax.set_yticks(y)
-    desc = state_descriptions()
-    ax.set_yticklabels([desc[s] for s in order])
+    desc = state_names()
+    ax.set_yticklabels([desc.get(s, s) for s in order])
     ax.invert_yaxis()
     ax.axvline(0, color=ns.INK, linewidth=0.5)
-    ax.set_xlabel("Drop in held-out R² when the state is permuted\n(unique contribution)")
-    ax.set_title("Which states matter")
-    ax.legend(loc="lower right", handlelength=0.8, borderaxespad=0.2)
+    ax.set_xlabel("Held-out R² lost on permutation")
+    ax.set_title("State importance")
+    # mid-right: the heterochromatin rows there are near zero, so the key covers no bar
+    ax.legend(loc="center right", handlelength=0.8, borderaxespad=0.2)
     ns.panel_label(ax, "a", x=-1.25)
 
     # b  single marks vs additive vs full vs states
@@ -154,8 +166,8 @@ def figure5():
     ax.set_yticks(y)
     ax.set_yticklabels(names)
     ax.invert_yaxis()
-    ax.set_xlabel("Spearman ρ, held-out chromosomes")
-    ax.set_title("Single, additive\nor combined")
+    ax.set_xlabel("Spearman, held-out genes")
+    ax.set_title("Marks alone and combined")
     ax.grid(axis="x", linewidth=0.3, color="#e6e6e6")
     ax.set_axisbelow(True)
     ns.panel_label(ax, "b", x=-0.75)
@@ -177,13 +189,13 @@ def figure5():
     ax.set_yticks(y)
     ax.set_yticklabels(names)
     ax.invert_yaxis()
-    ax.set_xlabel("Gain in ρ over\nthe additive model")
-    ax.set_title("Combinatorial\ncontribution")
+    ax.set_xlabel("Gain over the additive model")
+    ax.set_title("Mark interactions")
     ax.grid(axis="x", linewidth=0.3, color="#e6e6e6")
     ax.set_axisbelow(True)
     ns.panel_label(ax, "c", x=-0.6)
 
-    ns.save(fig, FIG, "Fig5_importance")
+    ns.save(fig, FIG, "Fig5_importance", groups={"a-c_importance": "abc"})
 
 
 def main() -> None:

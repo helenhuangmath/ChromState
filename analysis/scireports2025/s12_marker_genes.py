@@ -93,9 +93,9 @@ def main() -> None:
     pd.DataFrame(table).to_csv(OUT / "importance" / "marker_genes.tsv", sep="\t", index=False)
 
     n = len(rows)
-    fig = plt.figure(figsize=(ns.DOUBLE, (22 + 4.2 * n) * ns.MM))
-    gs = fig.add_gridspec(1, 5, width_ratios=[0.75, 0.75, 0.75, 1.75, 0.95], wspace=0.12,
-                          left=0.07, right=0.975, bottom=0.10, top=0.92)
+    fig = plt.figure(figsize=(ns.DOUBLE, (26 + 4.6 * n) * ns.MM))
+    gs = fig.add_gridspec(1, 5, width_ratios=[0.75, 0.75, 0.75, 1.5, 0.95], wspace=0.14,
+                          left=0.08, right=0.965, bottom=0.12, top=0.92)
     y = np.arange(n)
     for ci, cond in enumerate(CONDITIONS):
         ax = fig.add_subplot(gs[ci])
@@ -115,7 +115,7 @@ def main() -> None:
         else:
             ax.set_yticks([])
         if ci == 1:
-            ax.set_xlabel("Promoter state composition\n(TSS ± 1 kb)")
+            ax.set_xlabel("Promoter state share")
         for spine in ("left",):
             ax.spines[spine].set_visible(ci == 0)
         # group separators
@@ -132,20 +132,18 @@ def main() -> None:
     norm = np.log1p(grid) / np.log1p(np.repeat(np.maximum(S.max(axis=(0, 2)), 20.0), 3))[None, :]
     ax.imshow(norm, cmap=ns.mpl.colors.LinearSegmentedColormap.from_list(
         "sig", ["#ffffff", "#9ec5f4", "#3987e5"]), vmin=0, vmax=1, aspect="auto")
-    for i in range(n):
-        for j in range(grid.shape[1]):
-            ax.text(j, i, f"{grid[i, j]:.0f}", ha="center", va="center", fontsize=5)
+    # the read counts behind the colours are in out/importance/marker_genes.tsv
     for x in (2.5, 5.5, 8.5):
         ax.axvline(x, color=ns.INK, linewidth=0.5)
     ax.set_xticks(range(grid.shape[1]))
-    ax.set_xticklabels(["N", "M", "E"] * len(MARKS), fontsize=5)
+    ax.set_xticklabels(["N", "M", "E"] * len(MARKS), fontsize=6)
     for mi, m in enumerate(MARKS):
-        ax.text(mi * 3 + 1, -0.9, m, ha="center", va="bottom", fontsize=6)
+        ax.text(mi * 3 + 1, -0.9, m, ha="center", va="bottom", fontsize=ns.FS)
     ax.set_yticks([])
     ax.tick_params(length=0)
     for spine in ax.spines.values():
         spine.set_visible(False)
-    ax.set_xlabel("Promoter signal, mean reads per bin\n(N, TN; M, TMEM; E, TEX)")
+    ax.set_xlabel("Promoter signal (N, TN; M, TMEM; E, TEX)")
     for b in bounds[:-1]:
         ax.axhline(b - 0.5, color=ns.INK, linewidth=0.5)
     ns.panel_label(ax, "b", x=-0.03, y=1.03)
@@ -158,7 +156,7 @@ def main() -> None:
         ax.axhline(b - 0.5, color=ns.INK, linewidth=0.5)
     ax.set_ylim(n - 0.5, -0.5)
     ax.set_yticks([])
-    ax.set_xlabel("Expression,\nlog2(normalised count + 1)")
+    ax.set_xlabel("Expression (log2)")
     ax.set_title("RNA")
     ax.grid(axis="x", linewidth=0.3, color="#e6e6e6")
     ax.set_axisbelow(True)
@@ -167,13 +165,13 @@ def main() -> None:
     starts = np.concatenate([[0], bounds[:-1]])
     for grp, s0, s1 in zip(GENE_GROUPS, starts, bounds):
         ax.text(1.02, (s0 + s1 - 1) / 2, grp, transform=ax.get_yaxis_transform(),
-                rotation=270, va="center", ha="left", fontsize=6)
+                rotation=270, va="center", ha="left", fontsize=ns.FS)
     ax.legend(loc="lower right", handletextpad=0.2, borderaxespad=0.2)
 
     handles = [Patch(facecolor=c, label=name) for name, _, c in CLASSES]
     fig.legend(handles=handles, loc="lower center", ncol=5, bbox_to_anchor=(0.45, 0.0),
                handlelength=1.0, columnspacing=1.2)
-    ns.save(fig, FIG, "Fig6_marker_genes")
+    ns.save(fig, FIG, "Fig6_marker_genes", groups=False)     # one figure: the panels share the gene rows
     print(f"{n} genes -> {FIG / 'Fig6_marker_genes.pdf'}")
 
 

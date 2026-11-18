@@ -25,12 +25,12 @@ FIG = ensure_out("figures")
 FAMILY_STYLE = {
     # name: (display, colour, filled)
     "raw": ("Raw signal", ns.BASELINE, True),
-    "chmm_tss": ("ChromHMM label at TSS", ns.BASELINE_DARK, True),
-    "chmm_frac": ("ChromHMM state composition", ns.BASELINE_DARK, False),
-    "cs_tss": ("ChromState label at TSS", "#8fb6ea", True),
+    "chmm_tss": ("ChromHMM label", ns.BASELINE_DARK, True),
+    "chmm_frac": ("ChromHMM composition", ns.BASELINE_DARK, False),
+    "cs_tss": ("ChromState label", "#8fb6ea", True),
     "cs_quant": ("ChromState quantitative", ns.ACCENT, True),
-    "cs_quant_raw": ("ChromState quantitative + raw", "#1b4f8f", True),
-    "naive_rna": ("TN expression only", ns.BASELINE, False),
+    "cs_quant_raw": ("ChromState + raw signal", "#1b4f8f", True),
+    "naive_rna": ("TN expression", ns.BASELINE, False),
     "naive_rna+raw": ("TN expression + raw signal", ns.BASELINE_DARK, False),
     "naive_rna+cs_quant": ("TN expression + ChromState", ns.ACCENT, False),
 }
@@ -53,8 +53,9 @@ def figure1():
     with open(mdir / "model.pkl", "rb") as fh:
         model = pickle.load(fh)
     lab = pd.read_csv(mdir / "state_labels.tsv", sep="\t")
-    labels = lab["label"].tolist()
-    em = pd.DataFrame(model["hmm"].emissions.mean_matrix(), index=labels, columns=MARKS)
+    labels = ns.active_first(lab["label"])        # active TSS at the top, quiescent last
+    em = pd.DataFrame(model["hmm"].emissions.mean_matrix(), index=lab["label"].tolist(),
+                      columns=MARKS).loc[labels]
     occ = pd.read_csv(mdir / "occupancy_genome.tsv", sep="\t", index_col=0).loc[CONDITIONS]
     feats = pd.read_csv(OUT / "genes" / "gene_features.tsv.gz", sep="\t")
     expr = pd.read_csv(OUT / "rna" / "expression.tsv", sep="\t", index_col="gene_id")
@@ -79,8 +80,8 @@ def figure1():
     cb = fig.colorbar(im, ax=ax, fraction=0.08, pad=0.04, ticks=[0, 1])
     cb.outline.set_linewidth(0.4)
     cb.ax.tick_params(length=1.5, width=0.4)
-    cb.set_label("log(1 + mean) / mark max.", labelpad=1)
-    ax.set_title("State emissions")
+    cb.set_label("Mark level", labelpad=1)
+    ax.set_title("Mark levels")
     ns.panel_label(ax, "a", x=-0.95)
 
     # b  genome occupancy per cell state
@@ -95,9 +96,9 @@ def figure1():
     ax.invert_yaxis()
     ax.set_xscale("log")
     ax.xaxis.set_major_formatter(mpl.ticker.FuncFormatter(lambda v, _: f"{v:g}"))
-    ax.set_xlabel("Genome covered (%, log scale)")
+    ax.set_xlabel("Share of genome (%)")
     ax.legend(loc="lower right", handlelength=0.8, handletextpad=0.4, borderaxespad=0)
-    ax.set_title("Occupancy by cell state")
+    ax.set_title("State share")
     ns.panel_label(ax, "b", x=-0.95)
 
     # c  K selection
@@ -107,10 +108,8 @@ def figure1():
         ax.plot(ks["n_states"], ks["heldout_loglik_per_bin"], "-o", color=ns.INK,
                 markersize=2.5, markerfacecolor="white", markeredgewidth=0.6)
         ax.axvline(model["k"], color=ns.ACCENT, linewidth=0.6, linestyle="--")
-        ax.text(model["k"], ax.get_ylim()[0], f" K = {model['k']}", color=ns.INK,
-                va="bottom", ha="left", fontsize=5.5)
         ax.set_xticks(ks["n_states"])
-    ax.set_xlabel("Number of states (K)")
+    ax.set_xlabel("States (K)")
     ax.set_ylabel("Held-out log-likelihood per bin")
     ax.set_title("Model selection")
     ns.panel_label(ax, "c", x=-0.95)
@@ -121,8 +120,8 @@ def figure1():
     comp = naive[[f"P_cs_{lbl}" for lbl in labels]].dropna()
     top = comp.idxmax(axis=1).str.replace("P_cs_", "", regex=False)
     e = expr["Naive"].reindex(top.index)
-    order = [lbl for lbl in labels if (top == lbl).sum() >= 50]
-    order = sorted(order, key=lambda lbl: e[top == lbl].median())
+    # same order as panels a and b; boxplot position 1 is at the bottom, so reversed
+    order = [lbl for lbl in labels if (top == lbl).sum() >= 50][::-1]
     data = [e[top == lbl].dropna().to_numpy() for lbl in order]
     bp = ax.boxplot(data, vert=False, widths=0.6, showfliers=False, patch_artist=True,
                     medianprops=dict(color=ns.INK, linewidth=0.8),
@@ -132,12 +131,13 @@ def figure1():
         patch.set_facecolor(lab.set_index("label").loc[lbl, "color"])
         patch.set_alpha(0.9)
     ax.set_yticks(range(1, len(order) + 1))
-    ax.set_yticklabels([f"{full_state_name(lbl)} (n={(top == lbl).sum():,})" for lbl in order])
-    ax.set_xlabel("TN expression, log2(normalized count + 1)")
-    ax.set_title("Expression by promoter state (TN)")
+    ax.set_yticklabels([full_state_name(lbl) for lbl in order])
+    ax.set_xlabel("TN expression (log2)")
+    ax.set_title("Expression by promoter state")
     ns.panel_label(ax, "d", x=-0.95)
 
-    ns.save(fig, FIG, "Fig1_model")
+    ns.save(fig, FIG, "Fig1_model", groups={"a_mark_levels": "a", "b_state_share": "b",
+                                             "c_model_selection": "c", "d_expression_by_state": "d"})
 
 
 # ---------------------------------------------------------------------------
@@ -163,7 +163,7 @@ def dot_panel(ax, sub: pd.DataFrame, families, groups, group_names, title):
     ax.set_xticks(range(len(groups)))
     ax.set_xticklabels(group_names)
     ax.set_xlim(-0.6, len(groups) - 0.4)
-    ax.set_ylabel("Spearman ρ, held-out chromosomes")
+    ax.set_ylabel("Spearman, held-out genes")
     ax.set_title(title)
     ax.grid(axis="y", linewidth=0.3, color="#e4e3df")
     ax.set_axisbelow(True)
@@ -184,8 +184,8 @@ def figure2():
     marks = pd.read_csv(OUT / "predict" / "single_mark.tsv", sep="\t")
     fams = ["raw", "chmm_tss", "chmm_frac", "cs_tss", "cs_quant", "cs_quant_raw"]
 
-    fig = plt.figure(figsize=(ns.DOUBLE, 68 * ns.MM))
-    gs = fig.add_gridspec(1, 4, width_ratios=[1.0, 1.0, 0.85, 0.9], wspace=0.5,
+    fig = plt.figure(figsize=(ns.DOUBLE * 1.25, 80 * ns.MM))
+    gs = fig.add_gridspec(1, 4, width_ratios=[1.0, 1.0, 0.85, 0.9], wspace=0.55,
                           left=0.07, right=0.97, bottom=0.36, top=0.88)
 
     ax = fig.add_subplot(gs[0])
@@ -196,7 +196,7 @@ def figure2():
     ax = fig.add_subplot(gs[1])
     contrasts = list(CONTRAST_NAMES)
     dot_panel(ax, sc, fams, [f"B_change_{c}" for c in contrasts],
-              [CONTRAST_NAMES[c] for c in contrasts], "Expression change\nfrom chromatin change")
+              [CONTRAST_NAMES[c] for c in contrasts], "Expression change")
     ax.set_ylabel("")
     ns.panel_label(ax, "b", x=-0.2)
 
@@ -204,7 +204,7 @@ def figure2():
     pre_fams = ["naive_rna", "naive_rna+raw", "naive_rna+cs_quant", "raw", "cs_quant"]
     pre = [c for c in contrasts if c.endswith("_vs_Naive")]
     dot_panel(ax, sc, pre_fams, [f"C_prepattern_{c}" for c in pre],
-              [CONTRAST_NAMES[c] for c in pre], "Later change from\nTN chromatin only")
+              [CONTRAST_NAMES[c] for c in pre], "Change from TN chromatin")
     ax.set_ylabel("")
     ns.panel_label(ax, "c", x=-0.2)
 
@@ -219,16 +219,17 @@ def figure2():
     ax.set_yticks(y)
     ax.set_yticklabels(MARKS)
     ax.invert_yaxis()
-    ax.set_xlabel("Spearman ρ,\nsingle-mark model")
+    ax.set_xlabel("Spearman, single-mark model")
     ax.legend(loc="lower right", handlelength=0.8, borderaxespad=0)
-    ax.set_title("Which mark tracks\nexpression change")
+    ax.set_title("Single marks")
     ns.panel_label(ax, "d", x=-0.45)
 
     handles = legend_handles(fams) + legend_handles(["naive_rna", "naive_rna+raw",
                                                      "naive_rna+cs_quant"])
-    fig.legend(handles=handles, loc="lower center", ncol=5, bbox_to_anchor=(0.5, 0.0),
+    fig.legend(handles=handles, loc="lower center", ncol=3, bbox_to_anchor=(0.4, 0.0),
                columnspacing=1.2, handletextpad=0.2)
-    ns.save(fig, FIG, "Fig2_prediction")
+    ns.save(fig, FIG, "Fig2_prediction", groups={"a-c_prediction": "abc", "d_single_marks": "d"},
+            shared=["a-c_prediction"])
 
 
 # ---------------------------------------------------------------------------
@@ -241,7 +242,7 @@ def figure3():
     prom = pd.read_csv(bdir / "naive_promoters.tsv", sep="\t")
     q = pd.read_csv(bdir / "bivalent_quartiles.tsv", sep="\t")
 
-    fig = plt.figure(figsize=(ns.DOUBLE * 0.78, 58 * ns.MM))
+    fig = plt.figure(figsize=(ns.DOUBLE, 70 * ns.MM))
     gs = fig.add_gridspec(1, 2, width_ratios=[1.0, 1.25], wspace=0.45,
                           left=0.1, right=0.98, bottom=0.27, top=0.88)
 
@@ -255,13 +256,12 @@ def figure3():
     for patch, c in zip(bp["boxes"], classes):
         patch.set_facecolor(ns.ACCENT if c == "Bivalent" else "#d9d8d4")
     ax.set_xticks(range(1, 5))
-    ax.set_xticklabels([f"{c}\n(n={len(d):,})" for c, d in zip(classes, data)],
-                       rotation=30, ha="right")
-    ax.set_ylabel("ChromState bivalency score (TN)")
-    ax.set_title("Peak-called TN promoter class")
+    ax.set_xticklabels(classes, rotation=30, ha="right")
+    ax.set_ylabel("Bivalency score (TN)")
+    ax.set_title("Promoter class")
     conc = pd.read_csv(bdir / "concordance.tsv", sep="\t").set_index("score")
     auc = conc.loc["ChromState bivalency score (signal)", "auroc"]
-    ax.text(0.03, 0.97, f"AUROC = {auc:.2f}", transform=ax.transAxes, va="top", fontsize=5.5)
+    ax.text(0.03, 0.97, f"AUROC = {auc:.2f}", transform=ax.transAxes, va="top", fontsize=ns.FS)
     ns.panel_label(ax, "a", x=-0.32)
 
     ax = fig.add_subplot(gs[1])
@@ -277,23 +277,23 @@ def figure3():
             ax.plot([xi, xi], [a, b], color=col, linewidth=0.5)
     ax.axhline(0, color=ns.INK, linewidth=0.4)
     ax.set_xticks(x)
-    ax.set_xticklabels(["Q1\nH3K27me3-\ndominant", "Q2", "Q3", "Q4\nH3K4me3-\ndominant"])
-    ax.set_xlabel("TN bivalent promoters, quartile of H3K4me3 − H3K27me3")
+    ax.set_xticklabels(["Q1\nH3K27me3", "Q2", "Q3", "Q4\nH3K4me3"])
+    ax.set_xlabel("Quartile of H3K4me3 − H3K27me3 (TN bivalent promoters)")
     ax.set_ylabel("Median log2 fold change vs TN")
-    ax.set_title("Naive bivalent balance anticipates later expression")
+    ax.set_title("Bivalent balance and later expression")
     handles = [
         Line2D([0], [0], marker="o", linestyle="", color=ns.CONDITION_COLORS["Arm"],
                markersize=3.2, label="TMEM"),
         Line2D([0], [0], marker="o", linestyle="", color=ns.CONDITION_COLORS["Cl13"],
                markersize=3.2, label="TEX"),
         Line2D([0], [0], marker="o", linestyle="", color=ns.INK_SECONDARY,
-               markerfacecolor="white", markersize=3.2, label="Raw log2FC"),
+               markerfacecolor="white", markersize=3.2, label="Raw"),
         Line2D([0], [0], marker="o", linestyle="", color=ns.INK_SECONDARY, markersize=3.2,
-               label="Beyond expression-matched genes"),
+               label="Expression-matched"),
     ]
     ax.legend(handles=handles, loc="upper right", borderaxespad=0)
     ns.panel_label(ax, "b", x=-0.22)
-    ns.save(fig, FIG, "Fig3_bivalency")
+    ns.save(fig, FIG, "Fig3_bivalency", groups={"a_promoter_class": "a", "b_later_expression": "b"})
 
 
 def main() -> None:

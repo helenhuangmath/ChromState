@@ -3,7 +3,7 @@ on: [push, pull_request]
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     strategy:
       matrix:
         python-version: ["3.9", "3.11", "3.12"]
@@ -17,7 +17,7 @@ jobs:
       - run: pytest -q
 
   r-wrapper:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -25,6 +25,10 @@ jobs:
       - uses: r-lib/actions/setup-r@v2
       - run: echo "R_LIBS_USER=$(Rscript -e 'cat(.libPaths()[1])')" >> "$GITHUB_ENV"
       - run: pip install -e .
-      - run: Rscript -e 'install.packages(c("reticulate","testthat"), repos="https://cloud.r-project.org")'
+      - run: Rscript -e 'install.packages(c("reticulate", "testthat"), Ncpus=2)'
+        env:
+          USE_BUNDLED_LIBUV: "1"
       - run: R CMD INSTALL R/chromstatR
       - run: Rscript -e 'library(testthat); library(chromstatR); setwd("R/chromstatR/tests"); test_dir("testthat", stop_on_failure=TRUE)'
+        env:
+          RETICULATE_PYTHON: ${{ env.pythonLocation }}/bin/python

@@ -153,7 +153,7 @@ def apply_size_factors(ds: ChromStateDataset, factors: np.ndarray) -> ChromState
     samples = ds.samples
     if factors.shape != (len(samples), ds.n_marks):
         raise ValueError(f"factors must have shape ({len(samples)}, {ds.n_marks})")
-    offsets = np.ones((ds.n_rows, ds.n_marks))
+    offsets = np.ones((ds.n_rows, ds.n_marks), dtype=ds.size_factors.dtype)
     for i, s in enumerate(samples):
         offsets[ds.sample_mask(s)] = factors[i]
     ds.size_factors = offsets

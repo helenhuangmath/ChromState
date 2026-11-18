@@ -79,7 +79,7 @@ def count_bam(
 
     counts = np.zeros(len(binset), dtype=np.int32)
     offsets = binset.chrom_offsets()
-    bin_size = binset.bin_size
+    buffers: dict = {}
 
     with pysam.AlignmentFile(path, "rb") as bam:
         for read in bam.fetch(until_eof=True):
@@ -99,12 +99,27 @@ def count_bam(
                 pos = read.reference_end - shift
             else:
                 pos = read.reference_start + shift
-
-            start_row, n_rows = offsets[chrom]
-            local = pos // bin_size
-            if 0 <= local < n_rows:
-                counts[start_row + local] += 1
+            buf = buffers.setdefault(chrom, [])
+            buf.append(pos)
+            if len(buf) >= _FLUSH:
+                _tally(binset, chrom, buf, counts)
+                buf.clear()
+    for chrom, buf in buffers.items():
+        _tally(binset, chrom, buf, counts)
     return counts
+
+
+_FLUSH = 1_000_000
+
+
+def _tally(binset: BinSet, chrom: str, positions, counts: np.ndarray) -> None:
+    """Add one count per position to the bin holding it (positions off the tiling drop)."""
+    if not len(positions):
+        return
+    rows = binset.rows_for_positions(chrom, np.asarray(positions, dtype=np.int64))
+    rows = rows[rows >= 0]
+    if rows.size:
+        counts += np.bincount(rows, minlength=len(counts)).astype(counts.dtype)
 
 
 def count_bed_reads(
@@ -118,7 +133,7 @@ def count_bed_reads(
     """
     counts = np.zeros(len(binset), dtype=np.int32)
     offsets = binset.chrom_offsets()
-    bin_size = binset.bin_size
+    buffers: dict = {}
 
     with _open_text(path) as fh:
         for line in fh:
@@ -136,11 +151,13 @@ def count_bed_reads(
                 pos = end - shift
             else:
                 pos = (start + end) // 2
-
-            start_row, n_rows = offsets[chrom]
-            local = pos // bin_size
-            if 0 <= local < n_rows:
-                counts[start_row + local] += 1
+            buf = buffers.setdefault(chrom, [])
+            buf.append(pos)
+            if len(buf) >= _FLUSH:
+                _tally(binset, chrom, buf, counts)
+                buf.clear()
+    for chrom, buf in buffers.items():
+        _tally(binset, chrom, buf, counts)
     return counts
 
 
@@ -167,7 +184,6 @@ def score_peaks(
     """
     values = np.zeros(len(binset), dtype=np.float32)
     offsets = binset.chrom_offsets()
-    bin_size = binset.bin_size
 
     with _open_text(path) as fh:
         for line in fh:
@@ -190,11 +206,8 @@ def score_peaks(
             else:  # BED3
                 val = 1.0
 
-            start_row, n_rows = offsets[chrom]
-            lo = max(0, start // bin_size)
-            hi = min(n_rows, (end - 1) // bin_size + 1)
-            if hi > lo:
-                sl = slice(start_row + lo, start_row + hi)
+            sl = binset.rows_overlapping(chrom, start, end)
+            if sl.stop > sl.start:
                 np.maximum(values[sl], val, out=values[sl])
     return values
 
@@ -203,18 +216,17 @@ def _bin_means_from_intervals(
     starts: np.ndarray,
     ends: np.ndarray,
     values: np.ndarray,
-    n_bins: int,
-    bin_size: int,
-    chrom_size: int,
+    edges: np.ndarray,
 ) -> np.ndarray:
     """Base-weighted mean of piecewise-constant coverage over consecutive bins.
 
-    Uses the running integral of coverage, evaluated at every bin edge, so each bin's
-    mean is exact however the track's intervals straddle the bin boundaries -- and no
-    per-base array the size of the chromosome is ever allocated. Uncovered bases count
-    as zero, which is what an absent interval in a coverage track means.
+    ``edges`` are the ``n_bins + 1`` bin boundaries. Uses the running integral of
+    coverage, evaluated at every edge, so each bin's mean is exact however the track's
+    intervals straddle the bin boundaries -- and no per-base array the size of the
+    chromosome is ever allocated. Uncovered bases count as zero, which is what an absent
+    interval in a coverage track means.
     """
-    edges = np.minimum(np.arange(n_bins + 1, dtype=np.int64) * bin_size, chrom_size)
+    n_bins = len(edges) - 1
     if len(starts) == 0:
         return np.zeros(n_bins)
     # integral up to the end of interval i
@@ -245,24 +257,25 @@ def bin_bigwig(path: str, binset: BinSet) -> np.ndarray:
         ) from exc
 
     out = np.zeros(len(binset), dtype=np.float64)
-    offsets = binset.chrom_offsets()
+    chrom_col = binset.table["chrom"].to_numpy()
+    b_start = binset.table["start"].to_numpy()
+    b_end = binset.table["end"].to_numpy()
     bw = pyBigWig.open(path)
     try:
         sizes = bw.chroms()
-        for chrom, (start_row, n_rows) in offsets.items():
+        for sl in binset.chain_slices:
+            chrom = str(chrom_col[sl.start])
             if chrom not in sizes:
                 continue
-            ivs = bw.intervals(chrom) or ()
+            lo, hi = int(b_start[sl.start]), int(min(b_end[sl.stop - 1], sizes[chrom]))
+            if hi <= lo:
+                continue
+            ivs = bw.intervals(chrom, lo, hi) or ()
             arr = np.asarray(ivs, dtype=np.float64).reshape(-1, 3)
-            order = np.argsort(arr[:, 0], kind="stable")
-            arr = arr[order]
-            out[start_row:start_row + n_rows] = _bin_means_from_intervals(
-                arr[:, 0].astype(np.int64),
-                arr[:, 1].astype(np.int64),
-                arr[:, 2],
-                n_rows,
-                binset.bin_size,
-                int(sizes[chrom]),
+            arr = arr[np.argsort(arr[:, 0], kind="stable")]
+            edges = np.concatenate([b_start[sl], [b_end[sl.stop - 1]]]).astype(np.int64)
+            out[sl] = _bin_means_from_intervals(
+                arr[:, 0].astype(np.int64), arr[:, 1].astype(np.int64), arr[:, 2], edges,
             )
     finally:
         bw.close()

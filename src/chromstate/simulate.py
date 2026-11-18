@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
+import pandas as pd
 
 from .dataset import ChromStateDataset, dataset_from_arrays
 
@@ -191,6 +192,8 @@ def simulate(
     base_paths = [_sample_path(A, pi, n_bins, rng) for _ in range(n_chroms)]
     base_path = np.concatenate(base_paths)
 
+    # separate stream, so that adding doses does not change any other draw
+    dose_rank = np.random.default_rng(seed + 7919).random(len(base_path))
     from_idx = labels.index(from_state) if from_state in labels else None
     to_idx = labels.index(to_state) if to_state in labels else None
     responder = np.zeros(len(base_path), dtype=bool)
@@ -221,7 +224,10 @@ def simulate(
         path = base_path.copy()
         is_treated = sample in treated_set
         if is_treated and to_idx is not None:
-            path[responder] = to_idx
+            # ``sample_dose``: fraction of the responders that switch in this sample
+            # (nested, so a lower dose is a subset of a higher one). Default: all.
+            dose = float(perturbation.get("sample_dose", {}).get(sample, 1.0))
+            path[responder & (dose_rank < dose)] = to_idx
 
         mean = emis[path].copy()  # (n_rows, M)
         if blur > 0 and blurred.any():
@@ -336,3 +342,71 @@ def write_demo_files(outdir: str, seed: int = 0, n_bins: int = 2000) -> str:
     with open(manifest, "w") as fh:
         fh.write("\n".join(lines) + "\n")
     return manifest
+
+
+def simulate_genes_and_expression(
+    ds: ChromStateDataset,
+    truth: SimulationTruth,
+    n_genes: int = 600,
+    effects: Optional[Dict[str, float]] = None,
+    noise_sd: float = 0.5,
+    promoter_bins: int = 10,
+    seed: int = 0,
+):
+    """Place genes on the simulated genome and generate expression from *known* state effects.
+
+    Each gene's promoter is ``promoter_bins`` bins wide; its expression (log scale) is a
+    linear function of the fraction of promoter bins in each true state, with the
+    coefficients in ``effects`` (keyed by true state label; unlisted states have effect 0),
+    plus Gaussian noise. The default effects make the active promoter state raise
+    expression, the Polycomb and bivalent states lower it, and leave the rest neutral, so
+    :func:`chromstate.importance.state_importance` has a ground truth to be checked
+    against: the states with non-zero effects must rank above those without.
+
+    Returns ``(features, expression, true_effects)`` where ``features`` is a
+    :class:`chromstate.features.FeatureSet`, ``expression`` a per-gene Series indexed by
+    ``gene_id`` for the *first* sample, and ``true_effects`` the coefficient table used.
+    """
+    from .features import FeatureSet
+
+    rng = np.random.default_rng(seed)
+    sample = ds.samples[0]
+    mask = ds.sample_mask(sample)
+    bins = ds.bins.loc[mask].reset_index(drop=True)
+    states = truth.states[mask]
+    labels = list(truth.labels)
+    if effects is None:
+        effects = {}
+        for lbl in labels:
+            low = lbl.lower()
+            if low in ("tssa", "active tss") or (low.startswith("tss") and "biv" not in low):
+                effects[lbl] = 3.0
+            elif low.startswith("repr") or "polycomb" in low:
+                effects[lbl] = -2.0
+            elif "biv" in low:
+                effects[lbl] = -1.0
+    coef = np.array([effects.get(lbl, 0.0) for lbl in labels])
+
+    bin_size = int(bins["end"].iloc[0] - bins["start"].iloc[0])
+    rows = []
+    expr = {}
+    for g in range(n_genes):
+        # pick a promoter start so the whole window stays inside one chromosome
+        for _ in range(100):
+            i = int(rng.integers(0, len(bins) - promoter_bins))
+            if bins.at[i, "chrom"] == bins.at[i + promoter_bins - 1, "chrom"]:
+                break
+        chrom = bins.at[i, "chrom"]
+        start = int(bins.at[i, "start"])
+        frac = np.bincount(states[i:i + promoter_bins], minlength=len(labels)) / promoter_bins
+        gid = f"G{g:05d}"
+        # strand +: TSS at `start`; promoter window (±half) centred on it covers the bins
+        rows.append({"gene_id": gid, "name": gid, "chrom": chrom,
+                     "start": start + (promoter_bins // 2) * bin_size,
+                     "end": start + (promoter_bins // 2) * bin_size + 5000, "strand": "+"})
+        expr[gid] = float(frac @ coef + 5.0 + rng.normal(0, noise_sd))
+    features = FeatureSet.from_frame(pd.DataFrame(rows), source="simulated")
+    expression = pd.Series(expr, name="log_expression")
+    expression.index.name = "gene_id"
+    true_effects = pd.DataFrame({"state": labels, "true_effect": coef})
+    return features, expression, true_effects
