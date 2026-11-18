@@ -63,14 +63,14 @@ def state_summary(
 
     Columns
     -------
-    ``bp_hard``, ``pct_hard``        base pairs (and % of the sample's scored bases) by hard call
-    ``bp_soft``, ``pct_soft``        the same by posterior mass
-    ``mean_score``                   mean 0-100 score of the state over all bins
-    ``confidence``                   mean posterior of the state where it is the hard call
-    ``strength``                     posterior-weighted mean intensity (log fold; 0 = typical)
-    ``strength_sd``                  its posterior-weighted standard deviation
-    ``n_segments``, ``median_segment_bp``
-                                     contiguous hard-call segments and their median length
+
+    - ``bp_hard``, ``pct_hard``: base pairs and percentage of scored bases by hard call.
+    - ``bp_soft``, ``pct_soft``: base pairs and percentage of scored bases by posterior mass.
+    - ``mean_score``: mean 0–100 score of the state across all bins.
+    - ``confidence``: mean posterior of the state in bins where it is the hard call.
+    - ``strength``: posterior-weighted mean intensity, expressed as log fold change.
+    - ``strength_sd``: posterior-weighted standard deviation of intensity.
+    - ``n_segments``, ``median_segment_bp``: contiguous hard-call segments and their median length.
     """
     ds = seg.dataset
     samples = list(samples or ds.samples)

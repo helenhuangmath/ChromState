@@ -542,11 +542,10 @@ def abc_score(
     The table stays one row per pair, with three columns per sample, because pairs times
     samples runs to millions of rows on a real genome:
 
-    ``activity_<sample>``   the element's activity (missing activity counts as 0)
-    ``abc_raw_<sample>``    activity x contact, the element's absolute input to the gene
-    ``abc_<sample>``        ``abc_raw`` over the sum of ``abc_raw`` across every element
-                            linked to that gene, own promoter included: the share of the
-                            gene's input this element supplies
+    - ``activity_<sample>``: the element’s activity, with missing activity counted as zero.
+    - ``abc_raw_<sample>``: activity times contact, the element’s absolute input to the gene.
+    - ``abc_<sample>``: the element’s share of the total input across all elements linked
+      to that gene, including the gene’s promoter.
 
     Use ``abc`` to rank elements *within* a gene and ``abc_raw`` to compare a pair
     *between* conditions -- a share can rise only because a neighbour fell.
