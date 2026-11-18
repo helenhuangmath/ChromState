@@ -42,11 +42,10 @@ EPS = 1e-12
 def state_similarity(seg: Segmentation, method: str = "emission", flow_weight: float = 0.5) -> np.ndarray:
     """``(K, K)`` distance between states, in [0, 1] after scaling by the largest.
 
-    ``emission``   Euclidean distance between z-scored log emission profiles.
-    ``flow``       1 minus the symmetrised transition probability between the two states,
-                   relative to the largest off-diagonal transition (states that hand bins
-                   to each other are close).
-    ``both``       ``(1 - flow_weight) * emission + flow_weight * flow``.
+    - ``emission``: Euclidean distance between z-scored log emission profiles.
+    - ``flow``: 1 minus the symmetrised transition probability between the two states,
+      relative to the largest off-diagonal transition.
+    - ``both``: ``(1 - flow_weight) * emission + flow_weight * flow``.
     """
     D = state_distance_matrix(seg)
     D = D / max(D.max(), EPS)
@@ -105,6 +104,8 @@ def collapse_states(
         Explicit groups of state indices to merge, overriding the clustering. Every
         state must appear exactly once.
 
+    Notes
+    -----
     The result is a new :class:`Segmentation` on the same dataset: posteriors summed
     within groups, the Viterbi path mapped through the groups, emissions and transitions
     aggregated by occupancy, and labels re-derived from the merged emission profiles.

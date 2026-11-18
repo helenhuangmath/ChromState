@@ -4,7 +4,7 @@ The gene layer (:mod:`chromstate.features`) reads a gene through its promoter an
 Most cell-type-specific regulation sits further away, in enhancers 10-500 kb from the
 gene they control, and this module is the layer that reaches them. It follows the
 Activity-by-Contact logic (Fulco et al., 2019): an element matters to a gene in
-proportion to how active it is times how often it touches the gene's promoter.
+proportion to how active it is times how often it touches the gene's promoter.::
 
     candidate_enhancers   peaks -> elements, each flagged promoter or distal
     enhancer_activity     per element and sample: state composition, mark signal, ATAC
@@ -257,13 +257,13 @@ def enhancer_state_classes(
     Pass ``occupancy`` (each state's genome-wide share) when ``seg`` covers only part of
     the genome -- one chromosome at a time, say -- so every part is classified alike.
 
-    ``poised``      ``repressive_mark`` (H3K27me3) at ``min_fold`` or more together with
-                    any activating mark (H3K4me1 for a classic poised enhancer, H3K4me3
-                    for a bivalent promoter, H3K27ac, ATAC)
-    ``active``      ``active_mark`` at ``min_fold`` or more, not poised, and above every
-                    repressive mark
-    ``repressed``   some repressive mark at ``min_fold`` or more and not active or poised
-    ``background``  everything else
+    - ``poised``: ``repressive_mark`` (H3K27me3) at ``min_fold`` or more together with
+      any activating mark (H3K4me1 for a classic poised enhancer, H3K4me3 for a
+      bivalent promoter, H3K27ac, ATAC).
+    - ``active``: ``active_mark`` at ``min_fold`` or more, not poised, and above every
+      repressive mark.
+    - ``repressed``: some repressive mark at ``min_fold`` or more and not active or poised.
+    - ``background``: everything else.
 
     Heterochromatin that carries some acetylation (common at repeats) is therefore
     repressed, not active, because H3K9me3 dominates it. A Polycomb state with a weak
