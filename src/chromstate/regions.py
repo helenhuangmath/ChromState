@@ -14,7 +14,7 @@ buried in a function body. A :class:`RegionScheme` holds the three that matter:
 Three gene parts come out of it, and they are kept apart on purpose: a promoter state
 and an enhancer state do not mean the same thing, and the question "which enhancers
 contribute to this gene's expression, beyond its promoter" can only be asked when the
-promoter has been taken out of the enhancer space first.
+promoter has been taken out of the enhancer space first.::
 
     RegionScheme.promoters      TSS windows
     RegionScheme.bodies         gene bodies with the promoter trimmed off

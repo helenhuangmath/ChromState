@@ -21,7 +21,6 @@ extensions = [
     "sphinx.ext.autodoc",
     "sphinx.ext.autosummary",
     "sphinx.ext.napoleon",
-    "sphinx.ext.viewcode",
     "sphinx.ext.mathjax",
     "sphinx.ext.githubpages",
 ]
@@ -31,14 +30,13 @@ myst_heading_anchors = 3
 autosummary_generate = True
 autodoc_default_options = {"members": True, "undoc-members": False, "show-inheritance": True}
 autodoc_mock_imports = ["pysam", "pyBigWig", "anndata", "numba", "xgboost"]
-templates_path = ["_templates"]
 exclude_patterns = ["_generated/*.txt"]
 # Pages that include the repository's own Markdown carry links written for GitHub.
 suppress_warnings = ["myst.xref_missing", "myst.header", "image.not_readable"]
 
+html_baseurl = "https://helenhuangmath.github.io/ChromState/"
 html_theme = "sphinx_rtd_theme"
 html_title = f"ChromState {release} documentation"
-html_static_path = ["_static"]
 html_theme_options = {"navigation_depth": 3, "collapse_navigation": False}
 html_context = {
     "display_github": True,

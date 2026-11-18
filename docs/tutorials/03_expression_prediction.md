@@ -11,8 +11,8 @@ questions and answers each with a held-out number:
 3. Does a vocabulary of *defined* states (section 5.11 of the README) predict as well as
    states learned without supervision?
 
-Figures: [docs/figures/expression_prediction/](../figures/expression_prediction/).
-Code: [`tools/realdata/predict_cd8.py`](../../tools/realdata/predict_cd8.py); run with
+Figures: [docs/figures/expression_prediction/](https://github.com/helenhuangmath/ChromState/tree/main/docs/figures/expression_prediction).
+Code: [`tools/realdata/predict_cd8.py`](https://github.com/helenhuangmath/ChromState/blob/main/tools/realdata/predict_cd8.py); run with
 `../testing/sbatch/predict_cd8.sbatch` on the cluster.
 
 ## 1. Data and run

@@ -22,29 +22,23 @@ from .genome import BinSet, Genome
 class ChromStateDataset:
     """Binned multi-mark signal for one or more samples.
 
-    Attributes
-    ----------
-    X
-        ``(n_rows, n_marks)`` signal matrix. Rows are (sample, bin) pairs stacked in
-        sample order; columns are marks in ``marks`` order.
-    marks
-        Mark names, one per column of ``X``.
-    bins
-        ``(n_rows,)`` row metadata: ``chrom``, ``start``, ``end``, ``sample``.
-    chains
-        Contiguous row ranges the HMM may treat as single Markov chains. One per
-        (sample, chromosome); transitions never span a boundary.
-    size_factors
-        ``(n_rows, n_marks)`` multiplicative offsets applied to the emission mean. One
-        offset per (sample, mark) because every mark is its own sequencing library with
-        its own depth. These carry depth and spike-in normalisation, so the *counts*
-        stay integers and the likelihood stays a proper count likelihood -- ChromState
-        never divides the data through by a scale factor.
-    control
-        Optional ``(n_rows, n_marks)`` expected background from input/IgG.
-    is_count
-        Whether ``X`` holds genuine counts. Peak-score input sets this False, which
-        blocks the negative-binomial emission model.
+    Dataset fields
+    --------------
+
+    - ``X``: ``(n_rows, n_marks)`` signal matrix. Rows are (sample, bin) pairs stacked in
+      sample order; columns are marks in ``marks`` order.
+    - ``marks``: Mark names, one per column of ``X``.
+    - ``bins``: ``(n_rows,)`` row metadata: ``chrom``, ``start``, ``end``, ``sample``.
+    - ``chains``: Contiguous row ranges the HMM may treat as single Markov chains. One per
+      (sample, chromosome); transitions never span a boundary.
+    - ``size_factors``: ``(n_rows, n_marks)`` multiplicative offsets applied to the emission mean. One
+      offset per (sample, mark) because every mark is its own sequencing library with
+      its own depth. These carry depth and spike-in normalisation, so the *counts*
+      stay integers and the likelihood stays a proper count likelihood -- ChromState
+      never divides the data through by a scale factor.
+    - ``control``: Optional ``(n_rows, n_marks)`` expected background from input/IgG.
+    - ``is_count``: Whether ``X`` holds genuine counts. Peak-score input sets this False, which
+      blocks the negative-binomial emission model.
     """
 
     X: np.ndarray
