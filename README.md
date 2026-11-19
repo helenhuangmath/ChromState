@@ -38,7 +38,7 @@ well they predict gene expression. ChromState is a Python package (`chromstate`)
 command line and an R interface (`chromstatR`). It reads ChromHMM's input table
 unchanged.
 
-## What it looks like
+## Example results
 
 One model fitted to naive, memory and exhausted CD8 T cells (CUT&RUN, four marks, 16
 samples): the mark level of each state, its share of the genome in every replicate, and
