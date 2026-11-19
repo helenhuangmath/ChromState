@@ -20,6 +20,12 @@ which states predict gene expression.
 ChromState takes ChIP-seq, CUT&RUN, CUT&Tag or ATAC-seq data as BAM, BED, bigWig or
 peak files, in the same sample-by-mark table that ChromHMM uses.
 
+![Chromatin states and their changes between CD8 T-cell conditions](_generated/Fig3_a-d_states_and_changes.png)
+
+*One model fitted to naive, memory and exhausted CD8 T cells (CUT&RUN, four marks, 16
+samples): mark level of each state, its share of the genome in every replicate, and the
+change between conditions. More figures are on the [benchmarks page](docs/benchmarks.md).*
+
 ## Start here
 
 | Goal | Documentation |
@@ -27,6 +33,7 @@ peak files, in the same sample-by-mark table that ChromHMM uses.
 | Install Python or set up the R interface | [Installation](docs/INSTALL.md) |
 | Fit a model and inspect a result | [Quick start](docs/quickstart.md) |
 | Run a worked analysis | [Tutorials](docs/tutorial.md) |
+| Read the whole workflow in detail | [User guide](docs/user_guide.md) |
 | Look up command flags or table columns | [Command reference](docs/subcommands_index.md) · [File formats](docs/fileformats_index.md) |
 | Use ChromState from Python | [API reference](docs/api/index.md) |
 | Compare methods and datasets | [Benchmarks](docs/benchmarks.md) |
@@ -54,10 +61,31 @@ Report bugs or request features in the
 
 ## Citation
 
-If you use ChromState, please cite the software (see `CITATION.cff` in the repository):
+If you use ChromState, please cite the software:
 
 > Huang H. ChromState: quantitative chromatin state analysis. Version 1.1.0 (2026).
 > https://github.com/helenhuangmath/ChromState
+
+```bibtex
+@software{huang_chromstate_2026,
+  author  = {Huang, Hua},
+  title   = {ChromState: quantitative chromatin state analysis},
+  version = {1.1.0},
+  year    = {2026},
+  url     = {https://github.com/helenhuangmath/ChromState}
+}
+```
+
+## Contributing
+
+Bug reports, feature requests and pull requests are welcome. See
+[Contributing](CONTRIBUTING.md) and the [code of conduct](CODE_OF_CONDUCT.md).
+
+## Author
+
+ChromState is developed and maintained by Hua Huang
+([@helenhuangmath](https://github.com/helenhuangmath)). It is released under the MIT
+licence.
 
 ```{toctree}
 :maxdepth: 2
@@ -65,6 +93,7 @@ If you use ChromState, please cite the software (see `CITATION.cff` in the repos
 
 docs/INSTALL
 docs/quickstart
+docs/user_guide
 docs/algorithm
 docs/subcommands_index
 docs/fileformats_index
@@ -72,5 +101,7 @@ docs/tutorial
 docs/benchmarks
 docs/qa
 CHANGELOG
+CONTRIBUTING
+CODE_OF_CONDUCT
 docs/api/index
 ```
